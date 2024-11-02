@@ -69,8 +69,8 @@
 #include <mtllib/mtl_spx.h>
 #include <oqs/sig.h>
 
-#define MTL_MODE_SOA_METHOD 1
-// #define MTL_MODE_EDNS_METHOD 1
+// #define MTL_MODE_SOA_METHOD 1
+#define MTL_MODE_EDNS_METHOD 1
 
 /** Max number of RRSIGs to validate at once, suspend query for later. */
 #define MAX_VALIDATE_AT_ONCE 8
@@ -582,7 +582,8 @@ sentinel_get_keytag(char* start, uint16_t* keytag) {
 */
 static int 
 request_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
-                   int id, uint8_t* name, size_t name_len, uint16_t qclass, size_t i)
+                   int id, uint8_t* name, size_t name_len, uint16_t qclass,
+				   uint16_t type, size_t i)
 {
     struct module_qstate *newq = NULL;
 
@@ -595,8 +596,14 @@ request_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
 			return val_error(qstate, id);
 		}
 	#elif defined(MTL_MODE_EDNS_METHOD)
-		// Not Implemented at this time
-		assert(0)					
+		qstate->full_edns = 1;
+
+		if (!generate_request(qstate, id, name, name_len, type,
+								qclass, 0, &newq, 0))
+		{
+			verbose(VERB_ALGO, "error generating EDNS full signature request");
+			return val_error(qstate, id);
+		}					
 	#else
 		// This is an error should not get here.
 		assert(0)
@@ -626,9 +633,13 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
     size_t sig_size = 0;
     RANDOMIZER* mtl_rand = NULL;
     AUTHPATH *auth_path = NULL; 
-    RANDOMIZER* src_rand = NULL;
-    AUTHPATH *src_path = NULL;    
-	uint8_t* new_rrset = NULL;	 
+	uint8_t* new_rrset = NULL;	
+	#ifdef MTL_MODE_SOA_METHOD
+	    RANDOMIZER* src_rand = NULL;
+    	AUTHPATH *src_path = NULL;    
+		uint16_t new_sig_len = 0; 
+	#endif
+	struct packed_rrset_data* new_prd = NULL;
 
     const uint16_t rdata_size_field = 2;
     const uint16_t rrsig_size_field = 18;
@@ -655,11 +666,10 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
 				dname_remove_label(&qname, &qname_len);       
 			}      
 		#elif defined(MTL_MODE_EDNS_METHOD)
-			// Not Implemented at this time
-			assert(0)					
+			full_rrsig = reply_find_rrset(msg->rep, qname, qname_len, qinfo->qtype, qinfo->qclass); 				
 		#else
 			// This is an error should not get here.
-			assert(0)
+			assert(0);
 		#endif		
     }
 
@@ -700,11 +710,11 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
             struct ub_packed_rrset_key *src = vq->orig_msg->rep->rrsets[vq->wait_full_sig-1];
             struct packed_rrset_data *sprd = (struct packed_rrset_data*) src->entry.data;
             for(oset=sprd->count; oset<sprd->count + sprd->rrsig_count; oset++) {
-                // Get the current signature size
-                uint8_t *curr_sig = sprd->rr_data[oset];
-                size_t curr_len = sprd->rr_len[oset];    
-
+				
 				#ifdef MTL_MODE_SOA_METHOD
+	                // Get the current signature size
+	                uint8_t *curr_sig = sprd->rr_data[oset];
+	                size_t curr_len = sprd->rr_len[oset];    
 					// Find the condensed signature size length
 					uint8_t *sig_field = curr_sig + offset;
 					size_t condensed_size = mtl_auth_path_from_buffer(sig_field,
@@ -722,7 +732,7 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
 					*    2. The length of the condensed signature
 					*    3. The length of the signed ladder 
 					*/
-					uint16_t new_sig_len = offset + condensed_size + lsig_len + 32;
+					new_sig_len = offset + condensed_size + lsig_len + 32;
 					new_rrset = calloc(1, new_sig_len);
 					if(new_rrset == NULL) {
 						free(qname_ptr);
@@ -744,29 +754,44 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
 
 					// Write the full ladder with signature
 					memcpy(wptr, (char*)&dptr[buff_offset], lsig_len);
+
+					// Copy the new signed rrset to the original for validation
+					size_t pre_s = packed_rrset_sizeof(sprd);			
+
+					// Allocate the new structure and copy the original over
+					new_prd = regional_alloc(qstate->region, pre_s - sprd->rr_len[oset] + new_sig_len);
+					if(new_prd == NULL) {
+						free(qname_ptr);
+						free(new_rrset);
+						return 1;
+					}
+					memcpy(new_prd, sprd, pre_s);
+					// Update the structure pointers and then copy the new signatures over
+					packed_rrset_ptr_fixup(new_prd);	
+					memcpy(new_prd->rr_data[oset], new_rrset, new_sig_len);	
+					new_prd->rr_len[oset] = new_sig_len;				
+
 				#elif defined(MTL_MODE_EDNS_METHOD)
-					// Not Implemented at this time
-					assert(0)					
+					size_t pre_s = packed_rrset_sizeof(sprd);
+
+					// Replace the curr_sig/curr_len with the dptr/dptr_len
+					// Allocate the new structure and copy the original over
+					new_prd = regional_alloc(qstate->region, pre_s - sprd->rr_len[oset] + dptr_len);
+					if(new_prd == NULL) {
+						free(qname_ptr);
+						free(new_rrset);
+						return 1;
+					}
+
+					memcpy(new_prd, sprd, pre_s);
+					// Update the structure pointers and then copy the new signatures over
+					packed_rrset_ptr_fixup(new_prd);	
+					memcpy(new_prd->rr_data[oset], dptr, dptr_len);	
+					new_prd->rr_len[oset] = dptr_len;										
 				#else
 					// This is an error should not get here.
-					assert(0)
+					assert(0);
 				#endif
-
-				// Copy the new signed rrset to the original for validation
-				size_t pre_s = packed_rrset_sizeof(sprd);			
-
-				// Allocate the new structure and copy the original over
-				struct packed_rrset_data* new_prd = regional_alloc(qstate->region, pre_s - sprd->rr_len[oset] + new_sig_len);
-				if(new_prd == NULL) {
-					free(qname_ptr);
-					free(new_rrset);
-    				return 1;
-				}
-				memcpy(new_prd, sprd, pre_s);
-				// Update the structure pointers and then copy the new signatures over
-				packed_rrset_ptr_fixup(new_prd);	
-				memcpy(new_prd->rr_data[oset], new_rrset, new_sig_len);	
-				new_prd->rr_len[oset] = new_sig_len;				
 
 				// Switch the referenced RRSet and free the new record temporary memory
 				src->entry.data = new_prd;
@@ -907,7 +932,8 @@ validate_msg_signatures(struct module_qstate* qstate, struct val_qstate* vq,
 			{
 				*suspend = 1;
 				return request_updated_ladder(qstate, vq, id, s->rk.dname,
-											s->rk.dname_len, vq->qchase.qclass, i);
+											s->rk.dname_len, vq->qchase.qclass,
+											ntohs(s->rk.type), i);
 			}
 			log_nametypeclass(VERB_QUERY, "validator: response "
 				"has failed ANSWER rrset:", s->rk.dname,
@@ -959,7 +985,8 @@ validate_msg_signatures(struct module_qstate* qstate, struct val_qstate* vq,
 			{
 				*suspend = 1;
 				return request_updated_ladder(qstate, vq, id, s->rk.dname,
-											s->rk.dname_len, vq->qchase.qclass, i);
+											s->rk.dname_len, vq->qchase.qclass,
+											ntohs(s->rk.type), i);
 			}
 			log_nametypeclass(VERB_QUERY, "validator: response "
 				"has failed AUTHORITY rrset:", s->rk.dname,

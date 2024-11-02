@@ -1101,6 +1101,7 @@ int mesh_add_sub(struct module_qstate* qstate, struct query_info* qinfo,
         uint16_t qflags, int prime, int valrec, struct module_qstate** newq,
 	struct mesh_state** sub)
 {
+	struct edns_option* opt = NULL;	
 	/* find it, if not, create it */
 	struct mesh_area* mesh = qstate->env->mesh;
 	*sub = mesh_area_find(mesh, NULL, qinfo, qflags,
@@ -1120,6 +1121,22 @@ int mesh_add_sub(struct module_qstate* qstate, struct query_info* qinfo,
 			log_err("mesh_attach_sub: out of memory");
 			return 0;
 		}
+
+		if(qstate->full_edns) {		
+			/* allocate new element */
+			opt = (struct edns_option*)regional_alloc(qstate->region, sizeof(*opt));
+			if(!opt)
+				return 1;
+
+			opt->next = NULL;
+			opt->opt_code = LDNS_EDNS_MTL_FULL;
+			opt->opt_len = 0;
+			opt->opt_data = NULL;
+		
+			(*sub)->s.edns_opts_back_out = opt;
+			(*sub)->s.no_cache_lookup = 1;
+		}
+
 #ifdef UNBOUND_DEBUG
 		n =
 #else
