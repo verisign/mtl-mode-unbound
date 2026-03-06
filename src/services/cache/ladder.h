@@ -44,6 +44,7 @@
 #define SERVICES_CACHE_LADDER_H
 
 #include <mtllib/mtl.h>
+#include <mtllib/mtllib_buffer.h>
 #include <time.h>
 
 #include "util/storage/lruhash.h"
@@ -103,14 +104,27 @@ struct ladder_cache *ladder_cache_adjust(struct ladder_cache *l,
 										 struct config_file *cfg);
 
 /**
+ * Get the SID from the specific ladder buffer
+ *
+ * @param ladder_buff: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param sid: pointer to the Series ID structure allocated for the SID
+ * @return: 0 on success or 1 on failure
+ */
+int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID* sid);
+
+/**
  * Update or insert a ladder in the ladder cache for future use.
- * Will lookup if the ladder is in the cache and perform an update if necessary.
+ * Will lookup the ladder to see if it is in the cache and then
+ * perform an update if necessary.
  *
  * @param l: the ladder cache.
- * @param ref: reference ladder pointer
- * @return: true if the passed reference is updated, false if it is unchanged.
+ * @param ladder_buff: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @return: true if the passed reference is updated,
+ *          false if it is unchanged.
  */
-int ladder_cache_update(struct ladder_cache *l, LADDER *ref);
+int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size);
 
 /**
  * Check to see if the ladder is currently in the ladder cache.
@@ -118,20 +132,22 @@ int ladder_cache_update(struct ladder_cache *l, LADDER *ref);
  *       updated ladders with different rungs will reutrh false.
  *
  * @param l: the ladder cache.
- * @param ref: reference ladder pointer
+ * @param ref: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
  * @return: true if the ladder is in cache, false if it is not.
  */
-int ladder_cache_ladder_exists(struct ladder_cache *l, LADDER *ref);
+int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size);
+
 
 /**
- * Given a ladder cache and an auth path, look for a cached rung that can
- * verify the given auth path.
+ * Given a ladder cache and a series ID, get the cached ladder
  *
- * @param l: the ladder cache.
- * @param path: MTL authentication path
- * @return: RUNG pointer if it exists, or NULL if not
+ * @param l: the ladder cache
+ * @param sid: MTL series identifier
+ * @param hash_size: length in bytes of the hash (aka security parameter) 
+ * @return: MTLLIB_BUFFER pointer or NULL if no ladder
  */
-RUNG *ladder_cache_find_rung(struct ladder_cache *l, AUTHPATH *path);
+MTLLIB_BUFFER* ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size);
 
 /**
  * Clear the ladder cache entries
@@ -145,11 +161,12 @@ void ladder_cache_clear(struct ladder_cache *l);
  * Update the LRU access for a given ladder reference
  *
  * @param l: the ladder cache.
- * @param ref: reference ladder pointer
+ * @param ref: reference ladder buffer pointer
  * @param e: Pointer to the entry in the LRU cache.
- * @return: none
+ * @return: 0 on success or 1 on failure
  */
-void ladder_cache_touch(struct ladder_cache *l, LADDER *ref, struct lruhash_entry *e);
+int ladder_cache_touch(struct ladder_cache *l, MTLLIB_BUFFER *ref,
+						struct lruhash_entry *e, size_t hash_size);
 
 /********************************************
  * Ladder cache utility functions
@@ -196,6 +213,6 @@ void ladder_cache_data_free(void *data, void *userdata);
  * @param ladder_two: Pointer to the second ladder
  * @return 1 if they match and 0 if not
  */
-uint8_t ladder_cache_is_ladder_equal(LADDER *ladder_one, LADDER *ladder_two);
+uint8_t ladder_cache_is_ladder_equal(MTLLIB_BUFFER *ladder_one, MTLLIB_BUFFER *ladder_two);
 
 #endif /* SERVICES_CACHE_LADDER_H */

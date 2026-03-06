@@ -1101,7 +1101,7 @@ int mesh_add_sub(struct module_qstate* qstate, struct query_info* qinfo,
         uint16_t qflags, int prime, int valrec, struct module_qstate** newq,
 	struct mesh_state** sub)
 {
-	struct edns_option* opt = NULL;	
+	struct edns_option* opt = NULL;
 	/* find it, if not, create it */
 	struct mesh_area* mesh = qstate->env->mesh;
 	*sub = mesh_area_find(mesh, NULL, qinfo, qflags,

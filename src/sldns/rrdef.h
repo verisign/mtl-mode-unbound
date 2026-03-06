@@ -382,10 +382,37 @@ enum sldns_enum_algorithm
         LDNS_ECC_GOST           = 12,  /* RFC 5933 */
         LDNS_ECDSAP256SHA256    = 13,  /* RFC 6605 */
         LDNS_ECDSAP384SHA384    = 14,  /* RFC 6605 */
-	LDNS_ED25519		= 15,  /* RFC 8080 */
-	LDNS_ED448		= 16,  /* RFC 8080 */
-        LDNS_SLH_DSA_MTL_SHA2_128s = 248,
-        LDNS_SLH_DSA_MTL_SHAKE_128s = 249,			
+		LDNS_ED25519			= 15,  /* RFC 8080 */
+		LDNS_ED448				= 16,  /* RFC 8080 */
+//if optional algorithm enabled in configure.ac/.configure/config.h
+//  set their enum to the algorithm number set
+#ifdef PQC_ALGO_FL_DSA
+        LDNS_FL_DSA_512 = PQC_ALGO_FL_DSA,
+#endif
+#ifdef PQC_ALGO_ML_DSA
+        LDNS_ML_DSA_44 = PQC_ALGO_ML_DSA,
+#endif
+#ifdef PQC_ALGO_SLH_DSA_SHA2
+        LDNS_SLH_DSA_SHA2_128s = PQC_ALGO_SLH_DSA_SHA2,
+#endif
+#ifdef PQC_ALGO_SLH_DSA_SHAKE
+        LDNS_SLH_DSA_SHAKE_128s = PQC_ALGO_SLH_DSA_SHAKE,
+#endif
+#ifdef PQC_ALGO_MAYO_1
+        LDNS_MAYO_1 = PQC_ALGO_MAYO_1,
+#endif
+#ifdef PQC_ALGO_MAYO_2
+        LDNS_MAYO_2 = PQC_ALGO_MAYO_2,
+#endif
+#ifdef PQC_ALGO_SNOVA
+        LDNS_SNOVA_24_5_4 = PQC_ALGO_SNOVA,
+#endif
+#ifdef PQC_ALGO_SQISIGN
+        LDNS_SQISIGN_LVL1 = PQC_ALGO_SQISIGN,
+#endif
+#ifdef PQC_ALGO_HAWK
+        LDNS_HAWK_512 = PQC_ALGO_HAWK,
+#endif			
         LDNS_INDIRECT           = 252,
         LDNS_PRIVATEDNS         = 253,
         LDNS_PRIVATEOID         = 254

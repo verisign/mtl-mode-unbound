@@ -565,8 +565,6 @@ AC_SUBST(RUNTIME_PATH)
 # check to see if libraries are needed for these functions.
 AC_SEARCH_LIBS([inet_pton], [nsl])
 AC_SEARCH_LIBS([socket], [socket])
-AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
-AC_SEARCH_LIBS([mtl_initns], [mtlslib], ,[AC_MSG_ERROR(an acceptable version of mtllib was not found)])
 
 # check whether strptime also works
 AC_DEFUN([AC_CHECK_STRPTIME_WORKS],
@@ -641,6 +639,170 @@ else
 		ACX_FUNC_MALLOC([unbound])
 	fi
 fi
+
+AC_ARG_ENABLE(pqc-algo-fl-dsa, AS_HELP_STRING([--enable-pqc-algo-fl-dsa[=algocode]],[Enables signing with FL-DSA signatures. Algocode defaults to 244]))
+pqc_algo_fl_dsa=""
+case "$enable_pqc_algo_fl_dsa" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_FL_DSA], [244], [Define this to enable zone signign with FL-DSA signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_FL_DSA], [$enable-pqc-algo-fl-dsa], [Define this to enable zone signign with FL-DSA signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+esac
+
+AC_ARG_ENABLE(pqc-algo-ml-dsa, AS_HELP_STRING([--enable-pqc-algo-ml-dsa[=algocode]],[Enables signing with ML-DSA signatures. Algocode defaults to 245]))
+pqc_algo_ml_dsa=""
+case "$enable_pqc_algo_ml_dsa" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_ML_DSA], [245], [Define this to enable zone signign with ML-DSA signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_ML_DSA], [$enable-pqc-algo-ml-dsa], [Define this to enable zone signign with ML-DSA signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+esac
+
+AC_ARG_ENABLE(pqc-algo-slh-dsa-sha2, AS_HELP_STRING([--enable-pqc-algo-slh-dsa-sha2[=algocode]],[Enables signing with SLH-DSA-SHA2 signatures. Algocode defaults to 246]))
+pqc_algo_slh_dsa_sha2=""
+case "$enable_pqc_algo_slh_dsa_sha2" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SLH_DSA_SHA2], [246], [Define this to enable zone signign with SLH-DSA-SHA2 signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SLH_DSA_SHA2], [$enable_pqc_algo_slh_dsa_sha2], [Define this to enable zone signign with SLH-DSA-SHA2 signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+esac
+
+AC_ARG_ENABLE(pqc-algo-slh-dsa-shake, AS_HELP_STRING([--enable-pqc-algo-slh-dsa-shake[=algocode]],[Enables signing with SLH-DSA-SHAKE signatures. Algocode defaults to 247]))
+pqc_algo_slh_dsa_shake=""
+case "$enable_pqc_algo_slh_dsa_shake" in
+	""|no)
+		;;
+	yes)
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SLH_DSA_SHAKE], [247], [Define this to enable zone signign with SLH-DSA-SHAKE signatures])
+		;;
+	*)
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SLH_DSA_SHAKE], [$enable_pqc_algo_slh_dsa_shake], [Define this to enable zone signign with SLH-DSA-SHAKE signatures])
+		;;
+esac
+
+# add option to enable MLT mode algorithms
+AC_ARG_ENABLE(pqc-algo-mtl-mode, AS_HELP_STRING([--enable-pqc-algo-mtl-mode],[Enables signing with MTL mode algorithms.]))
+case "$enable-pqc-algo-mtl-mode" in
+	""|no)
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_MTL_ENABLED], [1], [Define this to enable mtl mode signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		AC_SEARCH_LIBS([mtl_initns], [mtlslib], ,[AC_MSG_ERROR(an acceptable version of mtllib was not found)])
+		;;
+esac
+
+# add option to enable PQC algorithm MAYO-1
+AC_ARG_ENABLE(pqc-algo-mayo-1, AS_HELP_STRING([--enable-pqc-algo-mayo-1[=algocode]], [Enables signing with MAYO-1 signatures. Algocode defaults to 230]))
+# just following the convention as above, but uhhhh why do we even need this following variable? it doesn't seem to be used anywhere
+pqc_algo_mayo_1=""
+# noticed that there is zero argument checking in here, compilation would break if the dev/user passes in a non-number like "abc"
+case "$enable_pqc_algo_mayo_1" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_MAYO_1], [230], [Define this to enable zone signing with with MAYO-1 signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_MAYO_1], [$enable_pqc_algo_mayo_1], [Define this to enable zone signing with with MAYO-1 signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+esac
+
+# add option to enable PQC algorithm MAYO-2 (MAYO gets 2 param sets because they're both NIST lvl I)
+AC_ARG_ENABLE(pqc-algo-mayo-2, AS_HELP_STRING([--enable-pqc-algo-mayo-2[=algocode]], [Enables signing with MAYO-2 signatures. Algocode defaults to 231]))
+# just following the convention as above, but uhhhh why do we even need this following variable? it doesn't seem to be used anywhere
+pqc_algo_mayo_2=""
+# noticed that there is zero argument checking in here, compilation would break if the dev/user passes in a non-number like "abc"
+case "$enable_pqc_algo_mayo_2" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_MAYO_2], [231], [Define this to enable zone signing with with MAYO-2 signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_MAYO_2], [$enable_pqc_algo_mayo_2], [Define this to enable zone signing with with MAYO-2 signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+esac
+
+#add option to enable PQC algorithm snova (SNOVA_24_5_4 param set)
+AC_ARG_ENABLE(pqc-algo-snova, AS_HELP_STRING([--enable-pqc-algo-snova[=algocode]], [Enables signing with SNOVA signatures. Algocode defaults to 231]))
+pqc_algo_snova=""
+case "$enable_pqc_algo_snova" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SNOVA], [232], [Define this to enable zone signing with with SNOVA signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SNOVA], [$enable_pqc_algo_snova], [Define this to enable zone signing with with SNOVA signatures])
+		AC_SEARCH_LIBS([OQS_SIG_new], [oqs], ,[AC_MSG_ERROR(an acceptable version of liboqs was not found)])
+		;;
+esac
+
+#add option to enable PQC algorithm SQIsign (SQIsign_lvl1 param set)
+AC_ARG_ENABLE(pqc-algo-sqisign, AS_HELP_STRING([--enable-pqc-algo-sqisign[=algocode]], [Enables signing with SQIsign signature. Algocode defaults to 232]))
+pqc_algo_sqisign=""
+case "$enable_pqc_algo_sqisign" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SQISIGN], [233], [Define this to enable zone signing with SQIsign signatures])
+		AC_SEARCH_LIBS([randombytes_select], [nistrng], ,[AC_MSG_ERROR(an acceptable version of nistrng was not found)])
+		AC_SEARCH_LIBS([__gmp_randinit], [gmp], ,[AC_MSG_ERROR(an acceptable version of gmp library was not found)])
+		AC_SEARCH_LIBS([sqisign_keypair], [sqisign], ,[AC_MSG_ERROR(an acceptable version of sqisign library was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_SQISIGN], [$enable_pqc_algo_sqisign], [Define this to enable zone signing with SQIsign signatures])
+		AC_SEARCH_LIBS([randombytes_select], [nistrng], ,[AC_MSG_ERROR(an acceptable version of nistrng was not found)])
+		AC_SEARCH_LIBS([__gmp_randinit], [gmp], ,[AC_MSG_ERROR(an acceptable version of gmp library was not found)])
+		AC_SEARCH_LIBS([sqisign_keypair], [sqisign], ,[AC_MSG_ERROR(an acceptable version of sqisign library was not found)])
+		;;
+esac
+
+#add option to enable PQC algorithm HAWK (Hawk-512 paramset, aka logn == 9)
+AC_ARG_ENABLE(pqc-algo-hawk, AS_HELP_STRING([--enable-pqc-algo-hawk[=algocode]], [Enables signing with HAWK signature. Algocode defaults to 233]))
+pqc_algo_hawk=""
+case "$enable_pqc_algo_hawk" in
+	""|no)
+		;;
+	yes)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_HAWK], [234], [Define this to enable zone signing with HAWK signatures])
+		AC_SEARCH_LIBS([randombytes_select], [nistrng], ,[AC_MSG_ERROR(an acceptable version of nistrng was not found)])
+		AC_SEARCH_LIBS([hawk_keygen], [hawk], ,[AC_MSG_ERROR(an acceptable version of hawk library was not found)])
+		;;
+	*)
+		AC_DEFINE_UNQUOTED([PQC_ALGO_HAWK], [$enable_pqc_algo_hawk], [Define this to enable zone signing with HAWK signatures])
+		AC_SEARCH_LIBS([randombytes_select], [nistrng], ,[AC_MSG_ERROR(an acceptable version of nistrng was not found)])
+		AC_SEARCH_LIBS([hawk_keygen], [hawk], ,[AC_MSG_ERROR(an acceptable version of hwk library was not found)])
+		;;
+esac
+
+
 
 # check windows threads (we use them, not pthreads, on windows).
 if test "$on_mingw" = "yes"; then

@@ -36,6 +36,7 @@
 #  include <openssl/dsa.h>
 #  endif
 #endif
+#include "validator/val_pqalgo.h"
 #endif /* HAVE_SSL */
 
 size_t
@@ -48,7 +49,15 @@ sldns_rr_dnskey_key_size_raw(const unsigned char* keydata,
 	/* for RSA keys */
 	uint16_t exp;
 	uint16_t int16;
+
+	/* for pqc keys */
+	size_t keysize = 0;
 	
+	keysize = pqalgo_get_pqc_key_size((sldns_algorithm)alg);
+	if(keysize > 0) {
+		return keysize;
+	}
+
 	switch ((sldns_algorithm)alg) {
 	case LDNS_DSA:
 	case LDNS_DSA_NSEC3:
@@ -102,9 +111,6 @@ sldns_rr_dnskey_key_size_raw(const unsigned char* keydata,
 	case LDNS_ED448:
 		return 456;
 #endif
-	case LDNS_SLH_DSA_MTL_SHA2_128s:
-	case LDNS_SLH_DSA_MTL_SHAKE_128s:		
-		return 128;
 	default:
 		return 0;
 	}

@@ -65,6 +65,9 @@
 /* Function Prototypes */
 uint8_t pqalgo_is_post_quantum_algorithm(int algo);
 uint8_t pqalgo_is_mtl_mode_algorithm(int algo);
+uint16_t pqalgo_get_mtl_sec_param(int algo);
+size_t  pqalgo_get_pqc_key_size(int algo);
+uint8_t pqalgo_is_liboqs_algorithm(int algo);
 
 uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig, size_t siglen,
                             unsigned char *key, size_t keylen, uint8_t algo,
@@ -80,10 +83,6 @@ uint8_t pqalgo_verify_rrsig_mtl_ladder(unsigned char *sig, size_t siglen,
 void pqalgo_mtl_ladder_cache_clear(void);
 
 /* Internal Functions that may be useful elsewhere */
-size_t bytes_to_uint32(unsigned char *buffer, uint32_t *value);
-uint8_t pqalgo_mtl_setup_params(uint8_t algo, uint16_t *seed_len,
-                                size_t *oid_len, uint8_t **oid,
-                                char *oqs_alg_id, uint16_t *key_len);
 uint8_t pqalgo_verify_mtl_full_signature(unsigned char *sig);
 
 #endif /* VALIDATOR_VAL_PQALGO_H */

@@ -52,7 +52,6 @@
 #include "sldns/sbuffer.h"
 
 #include <mtllib/mtl.h>
-#include <mtllib/mtl_spx.h>
 #include <oqs/sig.h>
 
 #if !defined(HAVE_SSL) && !defined(HAVE_NSS) && !defined(HAVE_NETTLE)
@@ -335,6 +334,10 @@ secalgo_ds_digest(int algo, unsigned char* buf, size_t len,
 int
 dnskey_algo_id_is_supported(int id)
 {
+	if(pqalgo_is_post_quantum_algorithm(id)) {
+		return 1;
+	}
+
 	switch(id) {
 	case LDNS_RSAMD5:
 		/* RFC 6725 deprecates RSAMD5 */
@@ -386,11 +389,8 @@ dnskey_algo_id_is_supported(int id)
 #else
 		return 1;
 #endif
+		break;
 #endif
-
-	case LDNS_SLH_DSA_MTL_SHA2_128s:
-	case LDNS_SLH_DSA_MTL_SHAKE_128s:
-		return 1;
 
 #ifdef USE_GOST
 	case LDNS_ECC_GOST:
@@ -557,6 +557,13 @@ static int
 setup_key_digest(int algo, EVP_PKEY** evp_key, const EVP_MD** digest_type, 
 	unsigned char* key, size_t keylen)
 {
+	// Handle the PQC Algorithms Here...
+	if(pqalgo_is_post_quantum_algorithm(algo)) {
+		// Nothing to do here as it is handled in verify_canonrrset
+		verbose(VERB_QUERY, "verify: Using PQ / PQ-MTL Algorithms %d", algo);
+		return 1;
+	}
+
 	switch(algo) {
 #if defined(USE_DSA) && defined(USE_SHA1)
 		case LDNS_DSA:
@@ -688,11 +695,6 @@ setup_key_digest(int algo, EVP_PKEY** evp_key, const EVP_MD** digest_type,
 			*digest_type = NULL;
 			break;
 #endif /* USE_ED448 */
-        case LDNS_SLH_DSA_MTL_SHA2_128s:
-        case LDNS_SLH_DSA_MTL_SHAKE_128s:
-            // Nothing to do here as it is handled in verify_canonrrset
-            verbose(VERB_QUERY, "verify: Using PQ MTL Algorithms");
-            break;
 		default:
 			verbose(VERB_QUERY, "verify: unknown algorithm %d", 
 				algo);
@@ -800,10 +802,10 @@ verify_canonrrset(sldns_buffer* buf, int algo, unsigned char* sigblock,
 	}
 #endif /* USE_ECDSA */
 
-	if(pqalgo_is_mtl_mode_algorithm(algo)) {
-		return pqalgo_verify_rrsig(buf, sigblock, sigblock_len, key, keylen, algo, env);
+	if(pqalgo_is_post_quantum_algorithm(algo)) {
+		uint8_t stat = pqalgo_verify_rrsig(buf, sigblock, sigblock_len, key, keylen, algo, env);
+		return stat;
 	}
-
 
 	/* do the signature cryptography work */
 #ifdef HAVE_EVP_MD_CTX_NEW
