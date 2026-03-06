@@ -740,12 +740,17 @@ dnskey_verify_rrset(struct module_env* env, struct val_env* ve,
 			tag != rrset_get_sig_keytag(rrset, i))
 			continue;
 		buf_canon = 0;
+
 		sec = dnskey_verify_rrset_sig(env->scratch,
 			env->scratch_buffer, ve, *env->now, rrset, 
 			dnskey, dnskey_idx, i, &sortree, &buf_canon, reason,
 			reason_bogus, section, qstate, env);
 		if(sec == sec_status_secure)
 			return sec;
+		if(sec == sec_status_extend)
+			verbose(VERB_ALGO, "rrset failed to verify: insufficient information (requery)");
+			return sec;
+
 		numchecked ++;
 		numverified ++;
 		if(sec == sec_status_indeterminate)
@@ -1700,6 +1705,5 @@ dnskey_verify_rrset_sig(struct regional* region, sldns_buffer* buf,
 			return sec_status_bogus;
 		}
 	}
-
 	return sec;
 }

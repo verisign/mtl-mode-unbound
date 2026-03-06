@@ -66,10 +66,10 @@
 #include "sldns/str2wire.h"
 
 #include <mtllib/mtl.h>
-#include <mtllib/mtl_spx.h>
+#include <mtllib/mtllib_buffer.h>
+#include <mtllib/mtllib.h>
 #include <oqs/sig.h>
 
-// #define MTL_MODE_SOA_METHOD 1
 #define MTL_MODE_EDNS_METHOD 1
 
 /** Max number of RRSIGs to validate at once, suspend query for later. */
@@ -579,6 +579,17 @@ sentinel_get_keytag(char* start, uint16_t* keytag) {
 
 /* 
  * Generate the ladder update request
+ * qstate:		query's (general) module state
+ * vq:			query's validation module state
+ * id:			module id
+ * name:		qname to be requested
+ * name_len:	size of name (as it is in wire format)
+ * qclass:		qclass to be requested
+ * type:		qtype to be requested
+ * i:			index of the RRset's RRsig to be extended (aka vq->wait_full_sig)
+ * 				Note: i / vq->vq_wait_full_sig is 1-indexed because
+ *					it also pulls double duty as trigger for process_updated_ladder()
+ *					(so that it still works if 0th RRset is extended)
 */
 static int 
 request_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
@@ -589,19 +600,21 @@ request_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
 
     vq->wait_full_sig = i+1;
 	#ifdef MTL_MODE_SOA_METHOD
+		verbose(VERB_ALGO, "Generating full signature request through SOA");
 		if (!generate_request(qstate, id, name, name_len, LDNS_RR_TYPE_SOA,
 								qclass, 0, &newq, 0))
 		{
-			verbose(VERB_ALGO, "error generating SOA full signature request");
+			verbose(VERB_ALGO, "Error generating SOA full signature request");
 			return val_error(qstate, id);
 		}
 	#elif defined(MTL_MODE_EDNS_METHOD)
+		verbose(VERB_ALGO, "Generating full signature request through EDNS option, dns query qtype %d", type);
 		qstate->full_edns = 1;
 
 		if (!generate_request(qstate, id, name, name_len, type,
 								qclass, 0, &newq, 0))
 		{
-			verbose(VERB_ALGO, "error generating EDNS full signature request");
+			verbose(VERB_ALGO, "Error generating EDNS full signature request");
 			return val_error(qstate, id);
 		}					
 	#else
@@ -623,7 +636,7 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
     struct ub_packed_rrset_key *full_rrsig = NULL; 
     char name_str[256];
     uint8_t *qname;
-	uint8_t *qname_ptr;
+    uint8_t *qname_ptr;
     size_t qname_len;
     size_t i;
     size_t oset;
@@ -633,13 +646,13 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
     size_t sig_size = 0;
     RANDOMIZER* mtl_rand = NULL;
     AUTHPATH *auth_path = NULL; 
-	uint8_t* new_rrset = NULL;	
-	#ifdef MTL_MODE_SOA_METHOD
-	    RANDOMIZER* src_rand = NULL;
-    	AUTHPATH *src_path = NULL;    
-		uint16_t new_sig_len = 0; 
-	#endif
-	struct packed_rrset_data* new_prd = NULL;
+    uint8_t* new_rrset = NULL;	
+    #ifdef MTL_MODE_SOA_METHOD
+        RANDOMIZER* src_rand = NULL;
+        AUTHPATH *src_path = NULL;    
+        uint16_t new_sig_len = 0; 
+    #endif
+    struct packed_rrset_data* new_prd = NULL;
 
     const uint16_t rdata_size_field = 2;
     const uint16_t rrsig_size_field = 18;
@@ -686,24 +699,36 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
             size_t dptr_len = prd->rr_len[i];  
 
             // Verify the algorithm is appropriate byte 4
-            if((dptr[4] != LDNS_SLH_DSA_MTL_SHA2_128s)&&
-               (dptr[4] != LDNS_SLH_DSA_MTL_SHAKE_128s)) {
+			uint8_t validation_type_check = 0;
+			if(pqalgo_is_mtl_mode_algorithm(dptr[4])) {
+				validation_type_check = 1;
+			}			
+            if(!validation_type_check) {
                 log_info("  ERROR - Invalid signature algorithm for extended validation type (%d)", dptr[4]);
+				return 1;
             }
 
             offset = rdata_size_field + rrsig_size_field + qname_len + mtl_sig_type_field;
 
             // Find the condensed signature length
-            sig_size = mtl_auth_path_from_buffer((char*)&dptr[offset],
-                        dptr_len - offset,
-                        16,
-                        8,
-                        &mtl_rand, &auth_path);
-            buff_offset = offset + sig_size;
-            lsig_len = dptr_len - buff_offset;
+			#ifdef PQC_ALGO_MTL_ENABLED
+				MTLLIB_BUFFER* buffer = NULL;
+				mtllib_buffer_initialize(&buffer, dptr_len - offset, (char*)&dptr[offset]);
+				size_t hash_size = pqalgo_get_mtl_sec_param(dptr[4]);
+				if(hash_size == 0) {
+					log_info("  ERROR - Invalid signature algorithm for extended validation type (%d)", dptr[4]);
+					return 1;
+				}
+				sig_size = mtllib_sig_buffer_condensed_sig_len(buffer, hash_size);
+				buff_offset = offset + sig_size;
+				lsig_len = dptr_len - buff_offset;
 
-			mtl_authpath_free(auth_path);
-			mtl_randomizer_free(mtl_rand);
+				mtl_authpath_free(auth_path);
+				mtl_randomizer_free(mtl_rand);
+			#else
+                log_info("  ERROR - Invalid signature algorithm for extended validation type (%d)", dptr[4]);
+				return 1;
+			#endif
 
             // The ladder location and length is known. 
 			// Now need to update the original response to include that signed ladder
@@ -756,7 +781,7 @@ process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
 					memcpy(wptr, (char*)&dptr[buff_offset], lsig_len);
 
 					// Copy the new signed rrset to the original for validation
-					size_t pre_s = packed_rrset_sizeof(sprd);			
+					size_t pre_s = packed_rrset_sizeof(sprd);
 
 					// Allocate the new structure and copy the original over
 					new_prd = regional_alloc(qstate->region, pre_s - sprd->rr_len[oset] + new_sig_len);
@@ -2979,15 +3004,27 @@ primeResponseToKE(struct ub_packed_rrset_key* dnskey_rrset,
 	}
 	if(key_entry_isgood(kkey))
 		sec = sec_status_secure;
+	else if(key_entry_needfullsig(kkey))
+		sec = sec_status_extend;
 	else
 		sec = sec_status_bogus;
 	verbose(VERB_DETAIL, "validate keys with anchor(DS): %s", 
 		sec_status_to_string(sec));
 
+	if(sec == sec_status_extend) {
+		log_nametypeclass(VERB_OPS, "failed to prime trust anchor -- "
+			"DNSKEY requires updated MTL ladder to complete validation", 
+			ta->name, LDNS_RR_TYPE_DNSKEY, ta->dclass);
+		//in this case, we return a (the same) bad key with the wait_full_sig flag set
+		//	so process_prime_response() knows to request the updated ladder
+		return kkey;
+	}
+
 	if(sec != sec_status_secure) {
 		log_nametypeclass(VERB_OPS, "failed to prime trust anchor -- "
 			"DNSKEY rrset is not secure", 
 			ta->name, LDNS_RR_TYPE_DNSKEY, ta->dclass);
+
 		/* NOTE: in this case, we should probably reject the trust 
 		 * anchor for longer, perhaps forever. */
 		if(qstate->env->cfg->harden_dnssec_stripped) {
@@ -3460,19 +3497,46 @@ process_dnskey_response(struct module_qstate* qstate, struct val_qstate* vq,
 	if(!key_entry_isgood(vq->key_entry)) {
 		if(key_entry_isbad(vq->key_entry)) {
 			if(vq->restart_count < ve->max_restart) {
-				val_blacklist(&vq->chain_blacklist, 
-					qstate->region, origin, 1);
+				if(key_entry_needfullsig(vq->key_entry)) {
+					//remove if prod
+					verbose(VERB_ALGO, "process_dnskey_response(), validator.c, attempting to request_updated_ladder()");
+
+					//if the key failed validation because it doesn't have a ladder
+					//then re fetch the key with the ladder and try again
+					struct reply_info* og_reply = msg->rep;		//equivalent to "chase_reply" in validate_msg_signatures()
+					size_t dnskey_i = 0;						//equivalent to "i" in validate_msg_signatures()
+					for (dnskey_i = 0; dnskey_i < og_reply->rrset_count; dnskey_i++) {	//find index of dnskey within rrset
+						if (dnskey == (og_reply->rrsets)[dnskey_i]) {					//raw ptr (addr) comparison
+							break;									//had to do this because
+						}											//	request_updated_ladder() and process_updated_ladder()
+					}												//	only works on rrset indexes
+					assert((og_reply->rrsets)[dnskey_i] == dnskey);	//	not the ptr to the item pointed by said index itself
+					if( request_updated_ladder(qstate, vq, id,
+							dnskey->rk.dname, dnskey->rk.dname_len,
+							vq->qchase.qclass, ntohs(dnskey->rk.type),
+							dnskey_i) != 0) {
+								verbose(VERB_ALGO, "process_dnskey_response(), validator.c, unable to request_updated_ladder()");
+							}
+				} else {
+					//else key failed validation because it doesn't match RRSIG
+					//then (allow to) blacklist region
+					val_blacklist(&vq->chain_blacklist,
+						qstate->region, origin, 1);
+				}
+
 				qstate->errinf = NULL;
 				vq->restart_count++;
 				vq->key_entry = old;
 				return;
 			}
+			//out of restarts, print error message for key
 			verbose(VERB_DETAIL, "Did not match a DS to a DNSKEY, "
 				"thus bogus.");
 			errinf_ede(qstate, reason, reason_bogus);
 			errinf_origin(qstate, origin);
 			errinf_dname(qstate, "for key", qinfo->qname);
 		}
+		//move on to next state, (non-)validate
 		vq->chain_blacklist = NULL;
 		vq->state = VAL_VALIDATE_STATE;
 		return;
@@ -3542,8 +3606,27 @@ process_prime_response(struct module_qstate* qstate, struct val_qstate* vq,
 	if(vq->key_entry) {
 		if(key_entry_isbad(vq->key_entry) 
 			&& vq->restart_count < ve->max_restart) {
-			val_blacklist(&vq->chain_blacklist, qstate->region, 
-				origin, 1);
+			if(key_entry_needfullsig(vq->key_entry)) {
+				//key failed validation because it didn't have ladder, refetch key with ladder
+				struct reply_info* og_reply = msg->rep;		//equivalent to "chase_reply" in validate_msg_signatures()
+				size_t dnskey_i = 0;						//equivalent to "i" in validate_msg_signatures()
+				for (dnskey_i = 0; dnskey_i < og_reply->rrset_count; dnskey_i++) {
+					if (dnskey_rrset == (og_reply->rrsets)[dnskey_i]) {
+						break;
+					}
+				}
+				assert((og_reply->rrsets)[dnskey_i] == dnskey_rrset);	
+				if( request_updated_ladder(qstate, vq, id,
+						dnskey_rrset->rk.dname, dnskey_rrset->rk.dname_len,
+						vq->qchase.qclass, ntohs(dnskey_rrset->rk.type),
+						dnskey_i) != 0) {
+							verbose(VERB_ALGO, "process_dnskey_response(), validator.c, unable to request_updated_ladder()");
+				}		
+			} else {
+				val_blacklist(&vq->chain_blacklist, qstate->region,
+					origin, 1);
+			}
+
 			qstate->errinf = NULL;
 			vq->restart_count++;
 			vq->key_entry = NULL;
@@ -3681,4 +3764,3 @@ val_state_to_string(enum val_state state)
 	}
 	return "UNKNOWN VALIDATOR STATE";
 }
-

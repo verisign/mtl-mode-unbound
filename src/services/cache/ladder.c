@@ -55,6 +55,7 @@
 #include "validator/val_secalgo.h"
 
 #include <mtllib/mtl.h>
+#include <mtllib/mtllib_buffer.h>
 #include <time.h>
 
 /**
@@ -123,38 +124,68 @@ struct ladder_cache *ladder_cache_adjust(struct ladder_cache *l,
 }
 
 /**
+ * Get the SID from the specific ladder buffer
+ *
+ * @param ladder_buff: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param sid: pointer to the Series ID structure allocated for the SID
+ * @return: 0 on success or 1 on failure
+ */
+int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID* sid)
+{
+	uint8_t* data_ptr = NULL;
+
+	if((ladder_buff == NULL) || (hash_size == 0) || (sid == NULL)  || (ladder_buff->buffer_position < (hash_size * 2) + 4)) {
+		return 1;
+	}
+
+	sid->length = hash_size * 2;
+	data_ptr = ladder_buff->buffer_data;
+	memcpy(&sid->id[0], &data_ptr[2], hash_size * 2);
+	return 0;
+}
+
+
+/**
  * Update or insert a ladder in the ladder cache for future use.
  * Will lookup the ladder to see if it is in the cache and then
  * perform an update if necessary.
  *
  * @param l: the ladder cache.
- * @param ref: reference ladder pointer
+ * @param ladder_buff: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
  * @return: true if the passed reference is updated,
  *          false if it is unchanged.
  */
-int ladder_cache_update(struct ladder_cache *l, LADDER *ref)
+int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size)
 {
 	uint8_t new_record = 0;
-	LADDER *cache_ladder = NULL;
+	MTLLIB_BUFFER *cache_ladder = NULL;
 	struct ladder_cache_key *key = NULL;
+	SERIESID sid;
 
-	if ((ref == NULL) || (l == NULL))
+	if ((ladder_buff == NULL) || (l == NULL) || (ladder_buff->buffer_position == 0) || 
+	    (hash_size == 0))
 	{
 		return 0;
 	}
 
+	if(ladder_buffer_get_sid(ladder_buff, hash_size, &sid)) {
+		return 0;
+	}
+
 	// Ladders are stored by SID
-	hashvalue_type h = hashlittle(ref->sid.id, ref->sid.length, 0xaa);
+	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
 
 	struct lruhash_entry *e;
 	/* looks up item with a readlock - no editing! */
-	if ((e = slabhash_lookup(&l->table, h, &ref->sid, 0)) != 0)
+	if ((e = slabhash_lookup(&l->table, h, &sid, 0)) != 0)
 	{
 		// For each ladder in the e->data, do the ladder compare
-		cache_ladder = e->data;
-		if (ladder_cache_is_ladder_equal(ref, cache_ladder))
+		cache_ladder = (MTLLIB_BUFFER*)e->data;
+		if (ladder_cache_is_ladder_equal(ladder_buff, cache_ladder))
 		{
-			ladder_cache_touch(l, cache_ladder, e);
+			ladder_cache_touch(l, cache_ladder, e, hash_size);
 			lock_rw_unlock(&e->lock);
 			return 2;
 		}
@@ -172,8 +203,8 @@ int ladder_cache_update(struct ladder_cache *l, LADDER *ref)
 		key->entry.key = key;
 		key->entry.data = NULL;
 
-		key->sid.length = ref->sid.length;
-		memcpy(key->sid.id, ref->sid.id, ref->sid.length);
+		key->sid.length = sid.length;
+		memcpy(key->sid.id, sid.id, sid.length);
 
 		lock_rw_wrlock(&key->entry.lock);
 		e = &key->entry;
@@ -186,21 +217,18 @@ int ladder_cache_update(struct ladder_cache *l, LADDER *ref)
 
 	if (key->entry.data != NULL)
 	{
-		mtl_ladder_free(key->entry.data);
+		mtllib_buffer_free(key->entry.data);
 		key->entry.data = NULL;
 	}
 
-	LADDER *new_rec = (LADDER *)calloc(1, sizeof(LADDER));
-	if(new_rec == NULL) {
+	MTLLIB_BUFFER* new_rec = NULL;	
+	if (mtllib_buffer_initialize(&new_rec, ladder_buff->buffer_position, NULL) != MTLLIB_OK) {
 		return 2;
-	}
-	memcpy(new_rec, ref, sizeof(LADDER));
-	size_t rung_size = sizeof(RUNG) * ref->rung_count;
-	new_rec->rungs = (RUNG *)calloc(1, rung_size);
-	memcpy(new_rec->rungs, ref->rungs, rung_size);
+    }
 
+	memcpy(new_rec->buffer_data, ladder_buff->buffer_data, ladder_buff->buffer_position);
+	new_rec->buffer_position = ladder_buff->buffer_position;
 	key->entry.data = new_rec;
-
 	lock_rw_unlock(&key->entry.lock);
 
 	if (new_record)
@@ -209,7 +237,7 @@ int ladder_cache_update(struct ladder_cache *l, LADDER *ref)
 	}
 	else
 	{
-		ladder_cache_touch(l, e->data, e);
+		ladder_cache_touch(l, new_rec, e, hash_size);
 	}
 	return 1;
 }
@@ -220,24 +248,33 @@ int ladder_cache_update(struct ladder_cache *l, LADDER *ref)
  *       updated ladders with different rungs will reutrh false.
  *
  * @param l: the ladder cache.
- * @param ref: reference ladder pointer
+ * @param ref: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
  * @return: true if the ladder is in cache, false if it is not.
  */
-int ladder_cache_ladder_exists(struct ladder_cache *l, LADDER *ref)
+int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size)
 {
-	if ((ref == NULL) || (l == NULL))
+	SERIESID sid;
+
+	if ((ref == NULL) || (l == NULL) || (hash_size == 0))
 	{
 		return 0;
 	}
 
+	if(ladder_buffer_get_sid(ref, hash_size, &sid)) {
+		return 0;
+	}
+
 	// Ladders are stored by SID
-	hashvalue_type h = hashlittle(ref->sid.id, ref->sid.length, 0xaa);
+	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
 
 	struct lruhash_entry *e;
 	/* looks up item with a readlock - no editing! */
-	if ((e = slabhash_lookup(&l->table, h, &ref->sid, 0)) != 0)
+	e = slabhash_lookup(&l->table, h, &sid, 0);
+	if(e != NULL) 
+	// if ((e = slabhash_lookup(&l->table, h, &sid, 0)) != 0)
 	{
-		LADDER *cache_ladder = e->data;
+		MTLLIB_BUFFER *cache_ladder = (MTLLIB_BUFFER*)e->data;
 		if (ladder_cache_is_ladder_equal(ref, cache_ladder))
 		{
 			lock_rw_unlock(&e->lock);
@@ -245,46 +282,40 @@ int ladder_cache_ladder_exists(struct ladder_cache *l, LADDER *ref)
 		}
 		lock_rw_unlock(&e->lock);
 	}
+
 	return 0;
 }
 
 /**
- * Given a ladder cache and an auth path, look for a cached rung that can
- * verify the given auth path.
+ * Given a ladder cache and a series ID, get the cached ladder
  *
- * @param l: the ladder cache.
- * @param path: MTL authentication path
- * @return: RUNG pointer if it exists, or NULL if not
+ * @param l: the ladder cache
+ * @param sid: MTL series identifier
+ * @param hash_size: length in bytes of the hash (aka security parameter) 
+ * @return: MTLLIB_BUFFER pointer or NULL if no ladder
  */
-RUNG *
-ladder_cache_find_rung(struct ladder_cache *l, AUTHPATH *path)
+MTLLIB_BUFFER* 
+ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size)
 {
-	LADDER *cache_ladder = NULL;
-	RUNG *tmp_rung = NULL;
+	MTLLIB_BUFFER *cache_ladder = NULL;
 	struct lruhash_entry *e = NULL;
 
-	if ((path == NULL) || (l == NULL))
+	if ((sid == NULL) || (l == NULL))
 	{
 		return NULL;
 	}
 
 	// Ladders are stored by SID
-	hashvalue_type h = hashlittle(path->sid.id, path->sid.length, 0xaa);
+	hashvalue_type h = hashlittle(sid->id, sid->length, 0xaa);
 
 	/* looks up item with a readlock - no editing! */
-	if ((e = slabhash_lookup(&l->table, h, &path->sid, 0)) != 0)
+	if ((e = slabhash_lookup(&l->table, h, sid, 0)) != 0)
 	{
-		cache_ladder = (LADDER *)e->data;
-
-		// Find the best containing ladder
-		tmp_rung = mtl_rung(path, cache_ladder);
-		if (tmp_rung != NULL)
-		{
-			ladder_cache_touch(l, cache_ladder, e);
-		}
-		lock_rw_unlock(&e->lock);
+		cache_ladder = (MTLLIB_BUFFER *)e->data;
+		ladder_cache_touch(l, cache_ladder, e, hash_size);
+		lock_rw_unlock(&e->lock);		
 	}
-	return tmp_rung;
+	return cache_ladder;
 }
 
 /**
@@ -295,22 +326,34 @@ ladder_cache_find_rung(struct ladder_cache *l, AUTHPATH *path)
  */
 void ladder_cache_clear(struct ladder_cache *l)
 {
-	if (l)
+	if (l) {
 		slabhash_clear(&l->table);
+	}
 }
 
 /**
  * Update the LRU access for a given ladder reference
  *
  * @param l: the ladder cache.
- * @param ref: reference ladder pointer
+ * @param ref: reference ladder buffer pointer
  * @param e: Pointer to the entry in the LRU cache.
- * @return: none
+ * @return: 0 on success or 1 on failure
  */
-void ladder_cache_touch(struct ladder_cache *l, LADDER *ref,
-						struct lruhash_entry *e)
+int ladder_cache_touch(struct ladder_cache *l, MTLLIB_BUFFER *ref,
+						struct lruhash_entry *e, size_t hash_size)
 {
-	hashvalue_type h = hashlittle(ref->sid.id, ref->sid.length, 0xaa);
+	SERIESID sid;
+
+	if ((ref == NULL) || (l == NULL) || (e == NULL))
+	{
+		return 1;
+	}
+
+	if(ladder_buffer_get_sid(ref, hash_size, &sid)) {
+		return 1;
+	}
+
+	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
 
 	struct lruhash *table = slabhash_gettable(&l->table, h);
 	/*
@@ -331,6 +374,8 @@ void ladder_cache_touch(struct ladder_cache *l, LADDER *ref,
 	}
 	lock_rw_unlock(&e->lock);
 	lock_quick_unlock(&table->lock);
+
+	return 0;
 }
 
 /**
@@ -352,11 +397,11 @@ ladder_cache_sizefunc(void *key, void *data)
 	size_t cache_entry_size = sizeof(struct ladder_cache_key);
 
 	// Plus the expiration and Ladder records
-	cache_entry_size += sizeof(LADDER);
+	cache_entry_size += sizeof(MTLLIB_BUFFER);
 
 	// Plus the rung data
-	LADDER *ladder = (LADDER *)data;
-	cache_entry_size += ladder->rung_count * sizeof(RUNG);
+	MTLLIB_BUFFER *ladder = (MTLLIB_BUFFER *)data;
+	cache_entry_size += ladder->buffer_position;
 
 	// Plus the size of the memory locks
 	cache_entry_size += lock_get_mem(&key->entry.lock);
@@ -439,7 +484,7 @@ void ladder_cache_data_free(void *data, void *ATTR_UNUSED(userdata))
 {
 	if (data != NULL)
 	{
-		mtl_ladder_free((LADDER *)data);
+	mtllib_buffer_free((MTLLIB_BUFFER *)data);
 	}
 }
 
@@ -450,39 +495,23 @@ void ladder_cache_data_free(void *data, void *ATTR_UNUSED(userdata))
  * @return 1 if they match and 0 if not
  */
 uint8_t
-ladder_cache_is_ladder_equal(LADDER *ladder_one, LADDER *ladder_two)
+ladder_cache_is_ladder_equal(MTLLIB_BUFFER *ladder_one, MTLLIB_BUFFER *ladder_two)
 {
-	uint8_t rung_match = 1;
-
-	if ((ladder_one == NULL) || (ladder_two == NULL))
+	if ((ladder_one == NULL) || (ladder_two == NULL) ||
+        (ladder_one->buffer_position > ladder_one->buffer_length) ||
+        (ladder_two->buffer_position > ladder_two->buffer_length))
 	{
 		return 0;
 	}
 
-	if ((ladder_two->flags == ladder_one->flags) &&
-		(ladder_two->rung_count == ladder_one->rung_count) &&
-		(ladder_two->sid.length == ladder_one->sid.length) &&
-		(memcmp(ladder_two->sid.id, ladder_one->sid.id,
-				ladder_two->sid.length) == 0))
-	{
-		for (uint16_t r = 0; r < ladder_two->rung_count; r++)
-		{
-			RUNG *cache_rung = ladder_two->rungs;
-			RUNG *src_rung = ladder_one->rungs;
-			if ((cache_rung[r].left_index != src_rung[r].left_index) ||
-				(cache_rung[r].right_index != src_rung[r].right_index) ||
-				(cache_rung[r].hash_length != src_rung[r].hash_length) ||
-				(memcmp(cache_rung[r].hash, src_rung[r].hash,
-						cache_rung[r].hash_length) != 0))
-			{
-				rung_match = 0;
-			}
-		}
-	}
-	else
-	{
-		rung_match = 0;
+	if((ladder_one->buffer_type != ladder_two->buffer_type) ||
+	   (ladder_one->buffer_position != ladder_two->buffer_position)) {
+		return 0;
 	}
 
-	return rung_match;
+	if(memcmp(ladder_one->buffer_data, ladder_two->buffer_data, ladder_one->buffer_position) == 0) {
+		return 1;
+	}
+
+	return 0;
 }

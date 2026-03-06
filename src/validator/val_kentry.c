@@ -239,6 +239,13 @@ key_entry_isbad(struct key_entry_key* kkey)
 	return (int)(d->isbad);
 }
 
+int
+key_entry_needfullsig(struct key_entry_key* kkey)
+{
+	struct key_entry_data* d = (struct key_entry_data*)kkey->entry.data;
+	return (int)(d->wait_full_sig);
+}
+
 char*
 key_entry_get_reason(struct key_entry_key* kkey)
 {
@@ -289,6 +296,7 @@ key_entry_create_null(struct regional* region,
 		return NULL;
 	d->ttl = now + ttl;
 	d->isbad = 0;
+	d->wait_full_sig = 0;
 	d->reason = (!reason || *reason == 0)
 		?NULL :(char*)regional_strdup(region, reason);
 		/* On allocation error we don't store the reason string */
@@ -314,6 +322,7 @@ key_entry_create_rrset(struct regional* region,
 		return NULL;
 	d->ttl = rd->ttl + now;
 	d->isbad = 0;
+	d->wait_full_sig = 0;
 	d->reason = (!reason || *reason == 0)
 		?NULL :(char*)regional_strdup(region, reason);
 		/* On allocation error we don't store the reason string */
@@ -344,6 +353,32 @@ key_entry_create_bad(struct regional* region,
 		return NULL;
 	d->ttl = now + ttl;
 	d->isbad = 1;
+	d->wait_full_sig = 0;
+	d->reason = (!reason || *reason == 0)
+		?NULL :(char*)regional_strdup(region, reason);
+		/* On allocation error we don't store the reason string */
+	d->reason_bogus = reason_bogus;
+	d->rrset_type = LDNS_RR_TYPE_DNSKEY;
+	d->rrset_data = NULL;
+	d->algo = NULL;
+	return k;
+}
+
+struct key_entry_key*
+key_entry_create_waitfullsig(struct regional* region,
+	uint8_t* name, size_t namelen, uint16_t dclass, time_t ttl,
+	sldns_ede_code reason_bogus, const char* reason,
+	time_t now)
+{
+	//(near) exact copy key_entry_create_bad()
+	struct key_entry_key* k;
+	struct key_entry_data* d;
+	if(!key_entry_setup(region, name, namelen, dclass, &k, &d))
+		return NULL;
+	d->ttl = now + ttl;
+	d->isbad = 1;
+	// this is the only difference to key_entry_create_bad()
+	d->wait_full_sig = 1;		
 	d->reason = (!reason || *reason == 0)
 		?NULL :(char*)regional_strdup(region, reason);
 		/* On allocation error we don't store the reason string */

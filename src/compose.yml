@@ -1,0 +1,42 @@
+services:
+  recursive-unbound:
+    image: docker.vrsn.com/rsl/pq-recursive-unbound:${IMAGE_VERSION:-1.21.0}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile_use_with_NSD
+      args:
+        - RESIM_BASE_VER=latest
+        - RESIM_RESOLVER_VER=${IMAGE_VERSION:-1.21.0}
+    environment:
+      - ROOT_NS_IP=192.168.1.50
+      - TRUST_ANCHOR=.     IN      DS      60 13 2 d758986f70d6bb4b70185510cfc8c51d592407c860d64fd61085cbc7237be073
+    hostname: unbound
+    networks:
+      serviceNet:
+        ipv4_address: "192.168.1.51"
+    ports:
+      - "5553:5553/udp"
+      - "5553:5553/tcp"      
+    tmpfs:
+      - /tmp
+
+  nsd:
+    image: docker.vrsn.com/rsl/resim-nsd-mtl:${RESIM_NSD_VER:-latest}
+    volumes:
+        - ./zones:/var/nsd/data/zones
+    hostname: root_server
+    networks:
+      serviceNet:
+        ipv4_address: "192.168.1.50"
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"             
+      
+
+networks:
+  serviceNet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+    internal: true # Isolates this network from the host's external network

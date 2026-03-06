@@ -1,0 +1,7 @@
+; Root Hints file so unbound where to send queries to root servers
+; Copied over from nsd's root zone
+
+.   3600    IN  NS  ns1.
+.   3600    IN  NS  ns2.
+ns1.    3600    IN  A   192.168.1.50
+ns2.    3600    IN  A   192.168.1.50
