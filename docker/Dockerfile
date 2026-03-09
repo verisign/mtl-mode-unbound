@@ -60,9 +60,6 @@ RUN mkdir -p /usr/local/etc/unbound/log /app
 COPY docker/config/unbound.conf /usr/local/etc/unbound/unbound.conf
 COPY docker/config/root.hints /usr/local/etc/unbound/root.hints
 COPY docker/docker-entrypoint.sh /
-COPY docker/test.sh /app
-RUN chmod -R 755 /app/test.sh /docker-entrypoint.sh
-
 
 # Setup unbound permissions (to run as non-root)
 RUN groupadd unbound && useradd -g unbound -s /etc -d /usr/unbound unbound
