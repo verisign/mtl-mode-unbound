@@ -66,11 +66,20 @@ struct ladder_cache
 };
 
 /**
+ * RFC1035 domain-name
+ */
+struct domain_name {
+	uint8_t labels[256];
+	uint8_t length;
+};
+
+/**
  * key for ip_ratelimit lookups, a source IP.
  */
 struct ladder_cache_key {
 	/** key value */
 	SERIESID sid;
+	struct domain_name signer_name;
 	/** lruhash key entry */
 	struct lruhash_entry entry;
 };
@@ -124,7 +133,7 @@ int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID
  * @return: true if the passed reference is updated,
  *          false if it is unchanged.
  */
-int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size);
+int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size, struct domain_name *signer_name);
 
 /**
  * Check to see if the ladder is currently in the ladder cache.
@@ -136,7 +145,7 @@ int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size
  * @param hash_size: length in bytes of the hash (aka security parameter)
  * @return: true if the ladder is in cache, false if it is not.
  */
-int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size);
+int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size, struct domain_name *signer_name);
 
 
 /**
@@ -147,7 +156,7 @@ int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_
  * @param hash_size: length in bytes of the hash (aka security parameter) 
  * @return: MTLLIB_BUFFER pointer or NULL if no ladder
  */
-MTLLIB_BUFFER* ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size);
+MTLLIB_BUFFER* ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size, struct domain_name *signer_name);
 
 /**
  * Clear the ladder cache entries
