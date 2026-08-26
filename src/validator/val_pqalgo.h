@@ -51,6 +51,7 @@
 #include "util/data/packed_rrset.h"
 #include "util/module.h"
 #include "sldns/sbuffer.h"
+#include "services/cache/ladder.h"
 
 /* Macros and value definitions */
 #define BIG_ENDIAN_PLATFORM (!*(uint8_t *)&(uint16_t){1})
@@ -78,11 +79,13 @@ uint8_t pqalgo_verify_rrsig_mtl_raw(unsigned char *sig, size_t siglen,
                                     size_t keylen, uint8_t algo, struct module_env* env);
 uint8_t pqalgo_verify_rrsig_mtl_ladder(unsigned char *sig, size_t siglen,
                                unsigned char *key, size_t keylen,
-                               uint8_t algo, struct module_env* env);
+                               uint8_t algo, struct module_env* env,
+                               struct domain_name *signer_name);
 
 void pqalgo_mtl_ladder_cache_clear(void);
 
 /* Internal Functions that may be useful elsewhere */
 uint8_t pqalgo_verify_mtl_full_signature(unsigned char *sig);
+struct domain_name * pqalgo_get_rrsig_signers_name(sldns_buffer *rrset);
 
 #endif /* VALIDATOR_VAL_PQALGO_H */

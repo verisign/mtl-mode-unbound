@@ -157,29 +157,31 @@ int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID
  * @return: true if the passed reference is updated,
  *          false if it is unchanged.
  */
-int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size)
+int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size, struct domain_name *signer_name)
 {
 	uint8_t new_record = 0;
 	MTLLIB_BUFFER *cache_ladder = NULL;
 	struct ladder_cache_key *key = NULL;
-	SERIESID sid;
+	struct ladder_cache_key lookup_key;
 
 	if ((ladder_buff == NULL) || (l == NULL) || (ladder_buff->buffer_position == 0) || 
-	    (hash_size == 0))
+	    (hash_size == 0) || (signer_name == NULL))
 	{
 		return 0;
 	}
 
-	if(ladder_buffer_get_sid(ladder_buff, hash_size, &sid)) {
+	if(ladder_buffer_get_sid(ladder_buff, hash_size, &lookup_key.sid)) {
 		return 0;
 	}
+	lookup_key.signer_name.length = signer_name->length;
+	memcpy(lookup_key.signer_name.labels, signer_name->labels, signer_name->length);
 
-	// Ladders are stored by SID
-	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
+	// Compute hashtable hint
+	hashvalue_type h = hashlittle(lookup_key.sid.id, lookup_key.sid.length, 0xaa);
 
 	struct lruhash_entry *e;
 	/* looks up item with a readlock - no editing! */
-	if ((e = slabhash_lookup(&l->table, h, &sid, 0)) != 0)
+	if ((e = slabhash_lookup(&l->table, h, &lookup_key, 0)) != 0)
 	{
 		// For each ladder in the e->data, do the ladder compare
 		cache_ladder = (MTLLIB_BUFFER*)e->data;
@@ -203,8 +205,11 @@ int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size
 		key->entry.key = key;
 		key->entry.data = NULL;
 
-		key->sid.length = sid.length;
-		memcpy(key->sid.id, sid.id, sid.length);
+		key->sid.length = lookup_key.sid.length;
+		memcpy(key->sid.id, lookup_key.sid.id, lookup_key.sid.length);
+
+		key->signer_name.length = lookup_key.signer_name.length;
+		memcpy(key->signer_name.labels, lookup_key.signer_name.labels, lookup_key.signer_name.length);
 
 		lock_rw_wrlock(&key->entry.lock);
 		e = &key->entry;
@@ -245,34 +250,36 @@ int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size
 /**
  * Check to see if the ladder is currently in the ladder cache.
  * Note: This function checks the ladder IDs and all rungs match. Thus
- *       updated ladders with different rungs will reutrh false.
+ *       updated ladders with different rungs will return false.
  *
  * @param l: the ladder cache.
  * @param ref: reference ladder buffer pointer
  * @param hash_size: length in bytes of the hash (aka security parameter)
  * @return: true if the ladder is in cache, false if it is not.
  */
-int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size)
+int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size, struct domain_name *signer_name)
 {
-	SERIESID sid;
+	struct ladder_cache_key cache_key;
 
-	if ((ref == NULL) || (l == NULL) || (hash_size == 0))
+	if ((ref == NULL) || (l == NULL) || (hash_size == 0) || (signer_name == NULL))
 	{
 		return 0;
 	}
 
-	if(ladder_buffer_get_sid(ref, hash_size, &sid)) {
+	if(ladder_buffer_get_sid(ref, hash_size, &cache_key.sid)) {
 		return 0;
 	}
+	cache_key.signer_name.length = signer_name->length;
+	memcpy(cache_key.signer_name.labels, signer_name->labels, signer_name->length);
 
-	// Ladders are stored by SID
-	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
+
+	// Compute hashtable hint
+	hashvalue_type h = hashlittle(cache_key.sid.id, cache_key.sid.length, 0xaa);
 
 	struct lruhash_entry *e;
 	/* looks up item with a readlock - no editing! */
-	e = slabhash_lookup(&l->table, h, &sid, 0);
+	e = slabhash_lookup(&l->table, h, &cache_key, 0);
 	if(e != NULL) 
-	// if ((e = slabhash_lookup(&l->table, h, &sid, 0)) != 0)
 	{
 		MTLLIB_BUFFER *cache_ladder = (MTLLIB_BUFFER*)e->data;
 		if (ladder_cache_is_ladder_equal(ref, cache_ladder))
@@ -295,21 +302,25 @@ int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_
  * @return: MTLLIB_BUFFER pointer or NULL if no ladder
  */
 MTLLIB_BUFFER* 
-ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size)
+ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size, struct domain_name *signer_name)
 {
 	MTLLIB_BUFFER *cache_ladder = NULL;
 	struct lruhash_entry *e = NULL;
+	struct ladder_cache_key cache_key;
 
 	if ((sid == NULL) || (l == NULL))
 	{
 		return NULL;
 	}
 
-	// Ladders are stored by SID
+	cache_key.sid = *sid;
+	cache_key.signer_name = *signer_name;
+
+	// Compute hashtable hint
 	hashvalue_type h = hashlittle(sid->id, sid->length, 0xaa);
 
 	/* looks up item with a readlock - no editing! */
-	if ((e = slabhash_lookup(&l->table, h, sid, 0)) != 0)
+	if ((e = slabhash_lookup(&l->table, h, &cache_key, 0)) != 0)
 	{
 		cache_ladder = (MTLLIB_BUFFER *)e->data;
 		ladder_cache_touch(l, cache_ladder, e, hash_size);
@@ -353,6 +364,8 @@ int ladder_cache_touch(struct ladder_cache *l, MTLLIB_BUFFER *ref,
 		return 1;
 	}
 
+	// Hash table only uses sid for the cache hint
+	// All tables with the same SID will get LRU updated
 	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
 
 	struct lruhash *table = slabhash_gettable(&l->table, h);
@@ -418,11 +431,11 @@ ladder_cache_sizefunc(void *key, void *data)
  */
 int ladder_cache_compare(void *k1, void *k2)
 {
-	struct ladder_cache_key *ladder_cache_1 = (struct ladder_cache_key *)k1;
-	struct ladder_cache_key *ladder_cache_2 = (struct ladder_cache_key *)k2;
-	SERIESID *key1 = &ladder_cache_1->sid;
-	SERIESID *key2 = &ladder_cache_2->sid;
+	struct ladder_cache_key *key1 = (struct ladder_cache_key *)k1;
+	struct ladder_cache_key *key2 = (struct ladder_cache_key *)k2;
+	int x;
 
+	// NULL is considered the last key, but is not equal to itself
 	if (key1 == NULL)
 	{
 		return -1;
@@ -432,26 +445,39 @@ int ladder_cache_compare(void *k1, void *k2)
 		return 1;
 	}
 
-	if (key1->length < key2->length)
+	// Longer SIDs come first
+	if (key1->sid.length < key2->sid.length)
 	{
 		return -1;
 	}
-	if (key1->length > key2->length)
+	if (key1->sid.length > key2->sid.length)
 	{
 		return 1;
 	}
 
-	for (uint16_t i = 0; i < key1->length; i++)
+	// Lexicographically earlier SIDs come later
+	for (uint16_t i = 0; i < key1->sid.length; i++)
 	{
-		if (key1->id[i] < key2->id[i])
+		if (key1->sid.id[i] < key2->sid.id[i])
 		{
 			return -1;
 		}
-		if (key1->id[i] > key2->id[i])
+		if (key1->sid.id[i] > key2->sid.id[i])
 		{
 			return 1;
 		}
 	}
+
+	// If SIDs match, check the signers' names using the same rules
+	if (key1->signer_name.length != key2->signer_name.length)
+	{
+		return key1->signer_name.length < key2->signer_name.length ? -1 : 1;
+	}
+	if( (x = memcmp(key1->signer_name.labels, key2->signer_name.labels, key1->signer_name.length)) != 0 ) {
+		return x < 0 ? -1 : 1;
+	}
+
+	// If neither SIDs nor Signer names mismatch, the keys are equal
 	return 0;
 }
 

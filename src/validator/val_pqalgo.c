@@ -165,6 +165,32 @@ pqalgo_verify_mtl_full_signature(unsigned char *sig)
 
 #ifdef PQC_ALGO_MTL_ENABLED
 /**
+ * Extract the Signer's Name field from an rrsig
+ */
+struct domain_name * pqalgo_get_rrsig_signers_name(sldns_buffer * rrsig) {
+    static size_t RRSET_SIGNERSNAME_OFFSET = 18; // Offset for parsing signer_name. Signer's Name field starts at byte 18 (zero-indexed).
+    struct domain_name *signer_name;
+    uint8_t label_length = 0;
+
+    if (rrsig == NULL) {
+        return NULL;
+    }
+
+    if ((signer_name = malloc(sizeof(struct domain_name))) == NULL) {
+        return NULL;
+    }
+
+    signer_name->length = 0;
+    while ((label_length = sldns_buffer_read_u8_at(rrsig, RRSET_SIGNERSNAME_OFFSET + signer_name->length)) != 0x00) { // Labels end with null terminator byte
+        signer_name->length += label_length + 1; // +1 to also include the length byte
+    }
+    signer_name->length++; // Include Null terminator
+    sldns_buffer_read_at(rrsig, RRSET_SIGNERSNAME_OFFSET, signer_name->labels, signer_name->length);
+    
+    return signer_name;
+}
+
+/**
  * Verify the raw mtl signature on the rrsig (e.g. condensed sig)
  * @param sig: Pointer to the signature buffer.
  * @param sig_len: Length of the signature buffer.
@@ -222,11 +248,13 @@ pqalgo_verify_rrsig_mtl_raw(unsigned char *sig, size_t siglen,
     mtllib_buffer_free(pubkey);
 
     // Look for a ladder in cache that may work
-    MTLLIB_BUFFER* ladder = ladder_cache_find_ladder(env->ladder_cache, &sid, hash_size);
+    struct domain_name *signer_name = pqalgo_get_rrsig_signers_name(rrset);
+    MTLLIB_BUFFER* ladder = ladder_cache_find_ladder(env->ladder_cache, &sid, hash_size, signer_name);
 
     if(mtllib_buffer_initialize(&rrset_buff, sldns_buffer_limit(rrset), sldns_buffer_begin(rrset))) {
         mtllib_buffer_free(rrset_buff);
         mtllib_buffer_free(auth_buffer);
+        free(signer_name);
         return LDNS_STATUS_MEM_ERR;
     }
 
@@ -235,6 +263,7 @@ pqalgo_verify_rrsig_mtl_raw(unsigned char *sig, size_t siglen,
 
     mtllib_buffer_free(rrset_buff);
     mtllib_buffer_free(auth_buffer);
+    free(signer_name);
 
     if (result == MTLLIB_NO_LADDER) {
         return LDNS_STATUS_CRYPTO_EXTEND;
@@ -258,7 +287,8 @@ pqalgo_verify_rrsig_mtl_raw(unsigned char *sig, size_t siglen,
 uint8_t
 pqalgo_verify_rrsig_mtl_ladder(unsigned char *sig, size_t siglen,
                                unsigned char *key, size_t keylen,
-                               uint8_t algo, struct module_env *env)
+                               uint8_t algo, struct module_env *env,
+                               struct domain_name *signer_name)
 {
     MTLLIB_CTX *mtl_ctx = NULL;
     size_t condensed_len = 0;
@@ -315,20 +345,22 @@ pqalgo_verify_rrsig_mtl_ladder(unsigned char *sig, size_t siglen,
         return LDNS_STATUS_MEM_ERR;
     }
 
-    if (ladder_cache_ladder_exists(env->ladder_cache, ladder_buffer, hash_size))
+    // If the ladder is already cached, then we don't need to verify the signature again
+    if (ladder_cache_ladder_exists(env->ladder_cache, ladder_buffer, hash_size, signer_name))
     {
         mtllib_key_free(mtl_ctx);
         mtllib_buffer_free(ladder_buffer);
         return LDNS_STATUS_OK;
     }
 
+    // If the ladder is new/updated, verify the signature then update the cache
     if(mtllib_verify_signed_ladder(mtl_ctx, ladder_buffer) != MTLLIB_OK) {
         mtllib_buffer_free(ladder_buffer);    
         mtllib_key_free(mtl_ctx);        
         return LDNS_STATUS_CRYPTO_BOGUS;
     }
 
-    ladder_cache_update(env->ladder_cache, ladder_buffer, hash_size);
+    ladder_cache_update(env->ladder_cache, ladder_buffer, hash_size, signer_name);
     mtllib_buffer_free(ladder_buffer);    
     mtllib_key_free(mtl_ctx);
 
@@ -398,8 +430,9 @@ uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig,
                             struct module_env *env)
 {
     uint8_t status;
+    struct domain_name *signer_name;
 
-    if ((sig == NULL) || (siglen == 0) || (key == NULL) || (keylen == 0))
+    if ((buf == NULL) || (sig == NULL) || (siglen == 0) || (key == NULL) || (keylen == 0))
     {
         return sec_status_bogus;
     }
@@ -424,13 +457,17 @@ uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig,
             //    (if it is not already in cache) and cache it
             if (pqalgo_verify_mtl_full_signature(sig))
             {
+                signer_name = pqalgo_get_rrsig_signers_name(buf);
+
                 if (pqalgo_verify_rrsig_mtl_ladder(sig, siglen, key,
-                                                keylen, algo, env) != LDNS_STATUS_OK)
+                                                keylen, algo, env, signer_name) != LDNS_STATUS_OK)
                 {
                     log_info("MTL signature (%d) - Full Signature Verification FAILED!", algo);
+                    free(signer_name);
                     return sec_status_bogus;
                 }
                 log_info("MTL signature (%d) - Full Signature Verification SUCCESS!", algo);
+                free(signer_name);
             }
             else
             {

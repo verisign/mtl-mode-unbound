@@ -66,6 +66,7 @@
 #include "services/listen_dnsport.h"
 #include "services/cache/rrset.h"
 #include "services/cache/infra.h"
+#include "services/cache/ladder.h"
 #include "services/mesh.h"
 #include "services/localzone.h"
 #include "services/authzone.h"
@@ -791,7 +792,7 @@ static int
 print_mem(RES* ssl, struct worker* worker, struct daemon* daemon,
 	struct ub_stats_info* s)
 {
-	size_t msg, rrset, val, iter, respip;
+	size_t msg, rrset, val, iter, respip, ladder;
 #ifdef CLIENT_SUBNET
 	size_t subnet = 0;
 #endif /* CLIENT_SUBNET */
@@ -807,6 +808,7 @@ print_mem(RES* ssl, struct worker* worker, struct daemon* daemon,
 #endif /* WITH_DYNLIBMODULE */
 	msg = slabhash_get_mem(daemon->env->msg_cache);
 	rrset = slabhash_get_mem(&daemon->env->rrset_cache->table);
+	ladder = slabhash_get_mem(&daemon->env->ladder_cache->table);
 	val = mod_get_mem(&worker->env, "validator");
 	iter = mod_get_mem(&worker->env, "iterator");
 	respip = mod_get_mem(&worker->env, "respip");
@@ -831,6 +833,8 @@ print_mem(RES* ssl, struct worker* worker, struct daemon* daemon,
 		return 0;
 	if(!print_longnum(ssl, "mem.cache.message"SQ, msg))
 		return 0;
+	if(!print_longnum(ssl, "mem.cache.ladder"SQ, ladder))
+		return 0;		
 	if(!print_longnum(ssl, "mem.mod.iterator"SQ, iter))
 		return 0;
 	if(!print_longnum(ssl, "mem.mod.validator"SQ, val))
