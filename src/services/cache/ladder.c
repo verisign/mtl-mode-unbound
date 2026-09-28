@@ -123,6 +123,35 @@ struct ladder_cache *ladder_cache_adjust(struct ladder_cache *l,
 	return l;
 }
 
+/** Wrapper for SHAKE128(msg, 256)
+* @param msg: message to be hashed
+* @param msg_len: length (in bytes) of msg
+* @param out: buffer to place output in (caller is responsible for checking that out is large enough to hold SIGTAG_LEN bytes)
+* @return 0 on success, 1 on failure
+*/
+uint8_t ladder_cache_calc_sigtag(uint8_t *msg, size_t msg_len, uint8_t *out) {
+	EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+	const EVP_MD *alg = EVP_shake128();
+	if ((ctx == NULL) || (alg == NULL)) {
+		return 1;
+	}
+	if (EVP_DigestInit_ex(ctx, EVP_shake128(), NULL) != 1) {
+		return 1;
+	}
+	if (EVP_DigestUpdate(ctx, msg, msg_len) != 1) {
+		EVP_MD_CTX_destroy(ctx);
+		return 1;
+	}
+	if (EVP_DigestFinalXOF(ctx, out, SIGTAG_LEN) != 1) {
+		EVP_MD_CTX_destroy(ctx);
+		return 1;
+	}
+
+	EVP_MD_CTX_destroy(ctx);
+	return 0; 
+	
+}
+
 /**
  * Get the SID from the specific ladder buffer
  *
@@ -145,6 +174,47 @@ int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID
 	return 0;
 }
 
+/**
+ * Get the maximum covered index from the specific ladder buffer
+ *
+ * @param ladder_buff: reference ladder buffer pointer
+ * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param right_index: pointer to fill with the index value
+ * @return: 0 on success or 1 on failure
+ */
+int ladder_buffer_get_right_index(MTLLIB_BUFFER* ladder_buff, size_t hash_size, MTL_INDEX *right_index)
+{
+	uint8_t* rungs_start = NULL;
+	size_t header_len = 2 + (2*hash_size) + 2; // Flags | SID | Rung_Count
+	uint16_t rung_count = 0;
+	size_t rung_size = (2*MTL_INDEX_LEN) + hash_size; // Size of a single rung: left_index | right_index | hash
+
+	if((ladder_buff == NULL) || (hash_size == 0) || (right_index == NULL)  || (mtllib_buffer_in_use(ladder_buff) < header_len)) {
+		return 1;
+	}
+	*right_index = 0;
+
+	rungs_start = mtllib_buffer_data_ptr(ladder_buff) + header_len;
+	bytes_to_uint16(rungs_start - 2, &rung_count);
+	if (rung_count == 0) {
+		return 1;
+	}
+	if (mtllib_buffer_in_use(ladder_buff) < header_len + rung_count * ((2 * MTL_INDEX_LEN) + hash_size)) {
+		return 1;
+	}
+
+	uint16_t i;
+	MTL_INDEX rung_right_index; // right index of the current rung
+	for (i = 0; i < rung_count; i++) {
+		bytes_to_mtl_index(rungs_start + (i * rung_size) + MTL_INDEX_LEN, &rung_right_index);
+		if (rung_right_index > *right_index) {
+			*right_index = rung_right_index;
+		}
+	}
+		
+	return 0;
+}
+
 
 /**
  * Update or insert a ladder in the ladder cache for future use.
@@ -154,10 +224,11 @@ int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID
  * @param l: the ladder cache.
  * @param ladder_buff: reference ladder buffer pointer
  * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param sigtag: tag associated with the ladder
  * @return: true if the passed reference is updated,
  *          false if it is unchanged.
  */
-int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size, struct domain_name *signer_name)
+int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size, uint8_t *sigtag, struct domain_name *signer_name)
 {
 	uint8_t new_record = 0;
 	MTLLIB_BUFFER *cache_ladder = NULL;
@@ -165,19 +236,17 @@ int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size
 	struct ladder_cache_key lookup_key;
 
 	if ((ladder_buff == NULL) || (l == NULL) || (ladder_buff->buffer_position == 0) || 
-	    (hash_size == 0) || (signer_name == NULL))
+	    (hash_size == 0) || (sigtag == NULL) || (signer_name == NULL))
 	{
 		return 0;
 	}
 
-	if(ladder_buffer_get_sid(ladder_buff, hash_size, &lookup_key.sid)) {
-		return 0;
-	}
+	memcpy(lookup_key.tag, sigtag, SIGTAG_LEN);
 	lookup_key.signer_name.length = signer_name->length;
 	memcpy(lookup_key.signer_name.labels, signer_name->labels, signer_name->length);
 
 	// Compute hashtable hint
-	hashvalue_type h = hashlittle(lookup_key.sid.id, lookup_key.sid.length, 0xaa);
+	hashvalue_type h = hashlittle(lookup_key.signer_name.labels, lookup_key.signer_name.length, 0xaa);
 
 	struct lruhash_entry *e;
 	/* looks up item with a readlock - no editing! */
@@ -205,8 +274,7 @@ int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size
 		key->entry.key = key;
 		key->entry.data = NULL;
 
-		key->sid.length = lookup_key.sid.length;
-		memcpy(key->sid.id, lookup_key.sid.id, lookup_key.sid.length);
+		memcpy(key->tag, lookup_key.tag, SIGTAG_LEN);
 
 		key->signer_name.length = lookup_key.signer_name.length;
 		memcpy(key->signer_name.labels, lookup_key.signer_name.labels, lookup_key.signer_name.length);
@@ -254,27 +322,26 @@ int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size
  *
  * @param l: the ladder cache.
  * @param ref: reference ladder buffer pointer
- * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param sigtag: sigtag for the signed ladder containing the ladder
+ * @param signer_name: name the the signer who signed this ladder
  * @return: true if the ladder is in cache, false if it is not.
  */
-int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size, struct domain_name *signer_name)
+int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, uint8_t *sigtag, struct domain_name *signer_name)
 {
 	struct ladder_cache_key cache_key;
 
-	if ((ref == NULL) || (l == NULL) || (hash_size == 0) || (signer_name == NULL))
+	if ((ref == NULL) || (l == NULL) || (sigtag == NULL) || (signer_name == NULL))
 	{
 		return 0;
 	}
 
-	if(ladder_buffer_get_sid(ref, hash_size, &cache_key.sid)) {
-		return 0;
-	}
 	cache_key.signer_name.length = signer_name->length;
 	memcpy(cache_key.signer_name.labels, signer_name->labels, signer_name->length);
+	memcpy(cache_key.tag, sigtag, SIGTAG_LEN);
 
 
 	// Compute hashtable hint
-	hashvalue_type h = hashlittle(cache_key.sid.id, cache_key.sid.length, 0xaa);
+	hashvalue_type h = hashlittle(cache_key.signer_name.labels, cache_key.signer_name.length, 0xaa);
 
 	struct lruhash_entry *e;
 	/* looks up item with a readlock - no editing! */
@@ -293,40 +360,85 @@ int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_
 	return 0;
 }
 
+/* args structure to pass into ladder_cache_check_compatible function pointer */
+struct ladder_cache_sigtag_check_compatible_args {
+	unsigned char *signature;
+	size_t signature_len;
+	size_t hash_size;
+	struct domain_name *signer_name;
+	MTLLIB_BUFFER *found_ladder;
+};
+
 /**
- * Given a ladder cache and a series ID, get the cached ladder
+ * Function pointer for use in ladder_cache_find_ladder -- set found_ladder to a cached ladder if its compatible with the authpath of signature
+ * @param sig: signature (full or condensed) to check compatibility against
+ * @param sig_len: length in bytes of the signature
+ * @param signer_name: signer name to match against
+ * @param found_ladder: current best match, NULL if none found
+ * @return: None
+ */
+static void ladder_cache_sigtag_check_compatible(struct lruhash_entry *e, void *args_ptr) {
+	struct ladder_cache_sigtag_check_compatible_args *args = args_ptr;
+	if (args->found_ladder != NULL) { // already found a ladder
+		return;
+	}
+
+	struct ladder_cache_key *key = e->key;
+	MTLLIB_BUFFER *ladder_buffer = e->data;
+
+	// Check for matching signer_name
+	if ((key->signer_name.length != args->signer_name->length) ||
+		(memcmp(key->signer_name.labels, args->signer_name->labels, key->signer_name.length) != 0)) {
+			return;
+		}
+
+	// Extract data structures from buffer
+	LADDER *ladder = NULL;
+	mtl_ladder_from_buffer(mtllib_buffer_data_ptr(ladder_buffer), mtllib_buffer_in_use(ladder_buffer), args->hash_size, &ladder);
+	RANDOMIZER *r;
+	AUTHPATH *authpath;
+	mtl_auth_path_from_buffer(args->signature, args->signature_len, args->hash_size, &r, &authpath);
+
+	// Are there any compatible rungs in the cached ladder?
+	if(mtl_rung(authpath, ladder) != NULL) {
+		args->found_ladder = ladder_buffer;
+	}
+}
+
+/**
+ * Given a ladder cache and a signature, get a cached ladder to compare against
  *
  * @param l: the ladder cache
- * @param sid: MTL series identifier
- * @param hash_size: length in bytes of the hash (aka security parameter) 
- * @return: MTLLIB_BUFFER pointer or NULL if no ladder
+ * @param sig: signature (full or condensed) to check compatibility against
+ * @param sig_len: length in bytes of the signature
+ * @return: MTLLIB_BUFFER pointer to a verified ladder compatible with the authpath of sig or NULL if no ladder
  */
 MTLLIB_BUFFER* 
-ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size, struct domain_name *signer_name)
+ladder_cache_find_ladder(struct ladder_cache *l, unsigned char *sig, size_t siglen, struct domain_name *signer_name)
 {
-	MTLLIB_BUFFER *cache_ladder = NULL;
 	struct lruhash_entry *e = NULL;
-	struct ladder_cache_key cache_key;
 
-	if ((sid == NULL) || (l == NULL))
+	if ((sig == NULL) || (siglen == 0) || (l == NULL) || (signer_name == NULL))
 	{
 		return NULL;
 	}
 
-	cache_key.sid = *sid;
-	cache_key.signer_name = *signer_name;
-
 	// Compute hashtable hint
-	hashvalue_type h = hashlittle(sid->id, sid->length, 0xaa);
+	hashvalue_type h = hashlittle(signer_name->labels, signer_name->length, 0xaa);
+	struct lruhash *bin = slabhash_gettable(&l->table, h);
 
-	/* looks up item with a readlock - no editing! */
-	if ((e = slabhash_lookup(&l->table, h, &cache_key, 0)) != 0)
-	{
-		cache_ladder = (MTLLIB_BUFFER *)e->data;
-		ladder_cache_touch(l, cache_ladder, e, hash_size);
-		lock_rw_unlock(&e->lock);		
-	}
-	return cache_ladder;
+
+	// Gather SigTags from ladders in bin
+	struct ladder_cache_sigtag_check_compatible_args args = {
+		.signature = sig,
+		.signature_len = siglen,
+		.hash_size = 16, // TODO dynamically compute
+		.signer_name = signer_name,
+		.found_ladder = NULL,
+	};
+
+	lruhash_traverse(bin, 0, ladder_cache_sigtag_check_compatible, &args);
+	return args.found_ladder;
 }
 
 /**
@@ -353,22 +465,16 @@ void ladder_cache_clear(struct ladder_cache *l)
 int ladder_cache_touch(struct ladder_cache *l, MTLLIB_BUFFER *ref,
 						struct lruhash_entry *e, size_t hash_size)
 {
-	SERIESID sid;
-
-	if ((ref == NULL) || (l == NULL) || (e == NULL))
+	if ((ref == NULL) || (l == NULL) || (e == NULL) || (e->key) == NULL)
 	{
 		return 1;
 	}
 
-	if(ladder_buffer_get_sid(ref, hash_size, &sid)) {
+	struct ladder_cache_key *cache_key = e->key;
+	if (cache_key == NULL) {
 		return 1;
 	}
-
-	// Hash table only uses sid for the cache hint
-	// All tables with the same SID will get LRU updated
-	hashvalue_type h = hashlittle(sid.id, sid.length, 0xaa);
-
-	struct lruhash *table = slabhash_gettable(&l->table, h);
+	struct lruhash *table = slabhash_gettable(&l->table, e->hash);
 	/*
 	 * This leads to locking problems, deadlocks, if the caller is
 	 * holding any other rrset lock.
@@ -381,10 +487,7 @@ int ladder_cache_touch(struct ladder_cache *l, MTLLIB_BUFFER *ref,
 	 */
 	lock_quick_lock(&table->lock);
 	lock_rw_rdlock(&e->lock);
-	if (e->hash == h)
-	{
-		lru_touch(table, e);
-	}
+	lru_touch(table, e);
 	lock_rw_unlock(&e->lock);
 	lock_quick_unlock(&table->lock);
 
@@ -445,30 +548,12 @@ int ladder_cache_compare(void *k1, void *k2)
 		return 1;
 	}
 
-	// Longer SIDs come first
-	if (key1->sid.length < key2->sid.length)
-	{
-		return -1;
-	}
-	if (key1->sid.length > key2->sid.length)
-	{
-		return 1;
+	// Compare SigTags
+	if( (x = memcmp(key1->tag, key2->tag, SIGTAG_LEN)) != 0 ) {
+		return x < 0 ? -1 : 1;
 	}
 
-	// Lexicographically earlier SIDs come later
-	for (uint16_t i = 0; i < key1->sid.length; i++)
-	{
-		if (key1->sid.id[i] < key2->sid.id[i])
-		{
-			return -1;
-		}
-		if (key1->sid.id[i] > key2->sid.id[i])
-		{
-			return 1;
-		}
-	}
-
-	// If SIDs match, check the signers' names using the same rules
+	// If SigTags match, check the signers' names using the same rules
 	if (key1->signer_name.length != key2->signer_name.length)
 	{
 		return key1->signer_name.length < key2->signer_name.length ? -1 : 1;
@@ -477,7 +562,7 @@ int ladder_cache_compare(void *k1, void *k2)
 		return x < 0 ? -1 : 1;
 	}
 
-	// If neither SIDs nor Signer names mismatch, the keys are equal
+	// If neither SigTags nor Signer names mismatch, the keys are equal
 	return 0;
 }
 
@@ -530,14 +615,109 @@ ladder_cache_is_ladder_equal(MTLLIB_BUFFER *ladder_one, MTLLIB_BUFFER *ladder_tw
 		return 0;
 	}
 
-	if((ladder_one->buffer_type != ladder_two->buffer_type) ||
-	   (ladder_one->buffer_position != ladder_two->buffer_position)) {
+	if(ladder_one->buffer_position != ladder_two->buffer_position) {
 		return 0;
 	}
 
 	if(memcmp(ladder_one->buffer_data, ladder_two->buffer_data, ladder_one->buffer_position) == 0) {
 		return 1;
 	}
+
+	return 0;
+}
+
+
+/* args structure to pass into ladder_cache_sigtag_add_matching function pointer */
+struct ladder_cache_sigtag_add_matching_args {
+	struct domain_name *signer_name;
+	MTLLIB_BUFFER *option_data;
+};
+
+/**
+ * Function pointer for use in ladder_cache_build_sigtag -- add tag for each matching entry found
+ * @param signer_name: signer name to match against
+ * @param option_data: buffer to append to
+ * @return: None
+ */
+static void ladder_cache_sigtag_add_matching(struct lruhash_entry *e, void *args_ptr) {
+	if ( (e == NULL) || (args_ptr == NULL) ) {
+		return;
+	}
+
+	struct ladder_cache_sigtag_add_matching_args *args = args_ptr;
+	if ( (args->signer_name == NULL) || (args->option_data == NULL) ) {
+		return;
+	}
+
+	struct ladder_cache_key *key = e->key;
+	MTLLIB_BUFFER *ladder_buffer = e->data;
+	if ( (key == NULL) || (ladder_buffer == NULL) ) {
+		return;
+	}
+
+#ifdef UNBOUND_DEBUG
+	fprintf(stderr, "...searching for signer: ");
+	for(int i=0; i<args->signer_name->length; i++) {
+		fprintf(stderr, "%c", args->signer_name->labels[i]);
+	}
+	fprintf(stderr, "\n");
+	fprintf(stderr, "...found cached signer : ");
+	for(int i=0; i<key->signer_name.length; i++) {
+		fprintf(stderr, "%c", key->signer_name.labels[i]);
+	}
+	fprintf(stderr, " ");
+	for(int i=0; i<SIGTAG_LEN; i++) {
+		fprintf(stderr, "%02x", key->tag[i]);
+	}
+	fprintf(stderr, "\n");
+	fflush(stderr);
+#endif
+
+	// Compare search signer name to signer name of entry
+	if (args->signer_name->length != key->signer_name.length) {
+		return;
+	}
+	if (memcmp(args->signer_name->labels, key->signer_name.labels, args->signer_name->length) != 0) {
+		return;
+	}
+
+	// Match found
+	if (mtllib_buffer_available(args->option_data) < SIGTAG_LEN) {
+		return;
+	}
+	mtllib_buffer_append(args->option_data, key->tag, SIGTAG_LEN);
+	
+	return;
+
+
+
+}
+/**
+ * Construct SigTag OPTION-DATA
+ * @param l: the ladder cache
+ * @param signer_name: the signer_name for which to search the cache for associated ladders
+ * @param option_data: buffer to fill with SigTags
+ * @return: 0 on success, 1 on failure. If successful, option-length is in_use(option_data).
+ *  If option_data is too small to hold all SigTags, the function will add as many as will fit;
+ *  This scenario is still considered a success
+ */
+uint8_t
+ladder_cache_build_sigtag(struct ladder_cache *l, struct domain_name *signer_name, MTLLIB_BUFFER *option_data) {
+	if ((l == NULL) || (signer_name == NULL) || (option_data == NULL)) {
+		return 1;
+	}
+
+	// Find appropriate bin in the hash table
+	hashvalue_type h = hashlittle(signer_name->labels, signer_name->length, 0xaa);
+	struct lruhash *bin = slabhash_gettable(&l->table, h);
+
+	// Gather SigTags from ladders in bin
+	struct ladder_cache_sigtag_add_matching_args args = {
+		.signer_name = signer_name,
+		.option_data = option_data,
+	};
+
+	lruhash_traverse(bin, 0, ladder_cache_sigtag_add_matching, &args);
 
 	return 0;
 }

@@ -218,9 +218,6 @@ struct val_qstate {
 	/** true if this state is waiting to prime a trust anchor */
 	int wait_prime_ta;
 
-	/** true if this state is waiting for a full signature response */
-	int wait_full_sig;	
-
 	/** State to continue with RRSIG validation in a message later */
 	int msg_signatures_state;
 	/** The rrset index for the msg signatures to continue from */

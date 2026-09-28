@@ -419,6 +419,8 @@ struct config_file {
 	int ignore_cd;
 	/** disable EDNS DO flag in outgoing requests */
 	int disable_edns_do;
+	/** Disable EDNS SigTag for MTL */
+	int enable_edns_sigtag_mtl;	
 	/** serve expired entries and prefetch them */
 	int serve_expired;
 	/** serve expired entries until TTL after expiration */

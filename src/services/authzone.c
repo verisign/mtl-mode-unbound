@@ -7816,8 +7816,6 @@ static int zonemd_dnssec_verify_rrset(struct auth_zone* z,
 	if(why_bogus)
 		auth_zone_log(z->name, VERB_ALGO, "DNSSEC verify was bogus: %s", *why_bogus);
 
-	if(sec == sec_status_extend)
-		return sec_status_extend;
 		
 	return 0;
 }

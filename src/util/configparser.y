@@ -204,6 +204,7 @@ extern struct config_parser_state* cfg_parser;
 %token VAR_INTERFACE_TAG_ACTION VAR_INTERFACE_TAG_DATA
 %token VAR_PROXY_PROTOCOL_PORT VAR_STATISTICS_INHIBIT_ZERO
 %token VAR_HARDEN_UNKNOWN_ADDITIONAL VAR_DISABLE_EDNS_DO VAR_CACHEDB_NO_STORE
+%token VAR_ENABLE_EDNS_SIGTAG_MTL
 %token VAR_LOG_DESTADDR VAR_CACHEDB_CHECK_WHEN_SERVE_EXPIRED
 %token VAR_COOKIE_SECRET_FILE
 
@@ -342,7 +343,7 @@ content_server: server_num_threads | server_verbosity | server_port |
 	server_tcp_reuse_timeout | server_tcp_auth_query_timeout |
 	server_interface_automatic_ports | server_ede |
 	server_proxy_protocol_port | server_statistics_inhibit_zero |
-	server_harden_unknown_additional | server_disable_edns_do |
+	server_harden_unknown_additional | server_disable_edns_do | server_enable_edns_sigtag_mtl |
 	server_log_destaddr | server_cookie_secret_file
 	;
 stubstart: VAR_STUB_ZONE
@@ -2135,6 +2136,15 @@ server_disable_edns_do: VAR_DISABLE_EDNS_DO STRING_ARG
 		free($2);
 	}
 	;
+server_enable_edns_sigtag_mtl: VAR_ENABLE_EDNS_SIGTAG_MTL STRING_ARG
+	{
+		OUTYY(("P(server_enable_edns_sigtag_mtl:%s)\n", $2));
+		if(strcmp($2, "yes") != 0 && strcmp($2, "no") != 0)
+			yyerror("expected yes or no.");
+		else cfg_parser->cfg->enable_edns_sigtag_mtl = (strcmp($2, "yes")==0);
+		free($2);
+	}
+	;	
 server_serve_expired: VAR_SERVE_EXPIRED STRING_ARG
 	{
 		OUTYY(("P(server_serve_expired:%s)\n", $2));

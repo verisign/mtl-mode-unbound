@@ -705,9 +705,6 @@ struct module_qstate {
 
 	/** whether the reply should be dropped */
 	int is_drop;
-
-	/** indicates if a full signature EDNS option is desired */
-	int full_edns;
 };
 
 /** 

@@ -69,6 +69,7 @@
 #include "sldns/str2wire.h"
 #include "sldns/parseutil.h"
 #include "sldns/sbuffer.h"
+#include "services/cache/ladder.h"
 
 /* in msec */
 int UNKNOWN_SERVER_NICENESS = 376;
@@ -3056,6 +3057,73 @@ processQueryTargets(struct module_qstate* qstate, struct iter_qstate* iq,
 			iq->dp->name, &real_addr, real_addrlen);
 	}
 
+	// Add SigTag EDNS Option
+	if(qstate->env->cfg->enable_edns_sigtag_mtl == 1) {
+		struct edns_option* opt = NULL;	
+		opt = (struct edns_option*)regional_alloc(qstate->region, sizeof(*opt));
+			if(!opt)
+				return 1;
+
+		opt->next = qstate->edns_opts_back_out;
+		qstate->edns_opts_back_out = opt;
+		opt->opt_code = LDNS_EDNS_MTL_SIGTAG;
+
+		// Read SigTag from cache
+		opt->opt_data = regional_alloc(qstate->region, SIGTAG_MAX_LEN); 
+		MTLLIB_BUFFER *sigtag = NULL;
+		mtllib_buffer_initialize(&sigtag, SIGTAG_MAX_LEN, opt->opt_data);
+		sigtag->buffer_position = 0;
+
+		/** Check 2 possibilities:
+	 	*  - Signer = qname (e.g. SOA)
+	 	*  - Signer = qname tail (e.g. A)
+	 	*/
+
+		struct domain_name signer_name;
+
+		// qname case
+		signer_name.length = qstate->qinfo.qname_len;
+		memcpy(signer_name.labels, qstate->qinfo.qname, signer_name.length);
+		if (ladder_cache_build_sigtag(qstate->env->ladder_cache, &signer_name, sigtag) != 0) {
+			mtllib_buffer_free(sigtag);
+			log_err("Unable to generate SigTag");
+			return 1;
+		}
+
+		// qname tail case
+		if (qstate->qinfo.qname_len > 1) { // if qname != '.'
+			uint8_t head_len = qstate->qinfo.qname[0] + 1;
+			signer_name.length = qstate->qinfo.qname_len - head_len;
+			memcpy(signer_name.labels, qstate->qinfo.qname + head_len, signer_name.length);
+			if (ladder_cache_build_sigtag(qstate->env->ladder_cache, &signer_name, sigtag) != 0) {
+				mtllib_buffer_free(sigtag);
+				log_err("Unable to generate SigTag");
+				return 1;
+			}
+		}
+
+#ifdef UNBOUND_DEBUG
+		fprintf(stderr, " UNBOUND - SNAME Requesting Names with SigTag Support %s:%d (sname size: %d) sigtag:(", __FUNCTION__, __LINE__, mtllib_buffer_in_use(sigtag));
+		uint8_t* buffer_ptr = mtllib_buffer_data_ptr(sigtag);
+		for(int i=0; i<mtllib_buffer_in_use(sigtag); i++) {
+			fprintf(stderr, "%02x", buffer_ptr[i] & 0xff);
+		}
+		fprintf(stderr, ")  signer_name:{ ");
+		for(int i=0; i<signer_name.length; i++) {
+			fprintf(stderr, "%c", signer_name.labels[i]);
+		}
+		fprintf(stderr, "} qname:{ ");
+		for(int i=0; i<qstate->qinfo.qname_len; i++) {
+			fprintf(stderr, "%c", qstate->qinfo.qname[i]);
+		}
+		fprintf(stderr, "}\n");
+		fflush(stderr);			
+#endif
+
+		opt->opt_len = mtllib_buffer_in_use(sigtag);
+		mtllib_buffer_free(sigtag);
+	}
+	
 	fptr_ok(fptr_whitelist_modenv_send_query(qstate->env->send_query));
 	outq = (*qstate->env->send_query)(&iq->qinfo_out,
 		iq->chase_flags | (iq->chase_to_rd?BIT_RD:0),

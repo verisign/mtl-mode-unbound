@@ -593,8 +593,6 @@ dnskeyset_verify_rrset_sig(struct module_env* env, struct val_env* ve,
 			section, qstate, env);
 		if(sec == sec_status_secure)
 			return sec;
-		if(sec == sec_status_extend)
-			extend_signatures++;
 		else if(sec == sec_status_indeterminate)
 			numindeterminate ++;
 		if(*numverified > MAX_VALIDATE_RRSIGS) {
@@ -605,9 +603,6 @@ dnskeyset_verify_rrset_sig(struct module_env* env, struct val_env* ve,
 			return sec_status_bogus;
 		}
 	}
-	if(extend_signatures != 0) {
-		return sec_status_extend;
-	}	
 	if(numchecked == 0) {
 		*reason = "signatures from unknown keys";
 		if(reason_bogus)
@@ -675,8 +670,6 @@ dnskeyset_verify_rrset(struct module_env* env, struct val_env* ve,
 		} else if(sigalg && sec == sec_status_bogus) {
 			algo_needs_set_bogus(&needs,
 				(uint8_t)rrset_get_sig_algo(rrset, i));
-		} else if(sec == sec_status_extend) {
-			return sec_status_extend;
 		}
 		if(*verified > MAX_VALIDATE_RRSIGS) {
 			verbose(VERB_QUERY, "rrset failed to verify, too many RRSIG validations");
@@ -746,9 +739,6 @@ dnskey_verify_rrset(struct module_env* env, struct val_env* ve,
 			dnskey, dnskey_idx, i, &sortree, &buf_canon, reason,
 			reason_bogus, section, qstate, env);
 		if(sec == sec_status_secure)
-			return sec;
-		if(sec == sec_status_extend)
-			verbose(VERB_ALGO, "rrset failed to verify: insufficient information (requery)");
 			return sec;
 
 		numchecked ++;

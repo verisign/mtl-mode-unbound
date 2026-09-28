@@ -53,6 +53,10 @@
 
 struct config_file;
 
+// Current max supported sigtags = 8; each sigtag length = 32 octets
+#define SIGTAG_MAX_LEN (8 * 32) 
+#define SIGTAG_LEN (32) // Sigtag <- SHAKE128/256()
+
 /********************************************
  * Structures for the ladder caches
  ********************************************/
@@ -78,7 +82,7 @@ struct domain_name {
  */
 struct ladder_cache_key {
 	/** key value */
-	SERIESID sid;
+	uint8_t tag[SIGTAG_LEN];
 	struct domain_name signer_name;
 	/** lruhash key entry */
 	struct lruhash_entry entry;
@@ -112,6 +116,14 @@ void ladder_cache_delete(struct ladder_cache *l);
 struct ladder_cache *ladder_cache_adjust(struct ladder_cache *l,
 										 struct config_file *cfg);
 
+ /** Wrapper for SHAKE128(msg, 256)
+* @param msg: message to be hashed
+* @param msg_len: length (in bytes) of msg
+* @param out: buffer to place output in (caller is responsible for checking that out is large enough to hold SIGTAG_LEN bytes)
+* @return 0 on success, 1 on failure
+*/
+uint8_t ladder_cache_calc_sigtag(uint8_t *msg, size_t msg_len, uint8_t *out);
+
 /**
  * Get the SID from the specific ladder buffer
  *
@@ -130,33 +142,35 @@ int ladder_buffer_get_sid(MTLLIB_BUFFER* ladder_buff, size_t hash_size, SERIESID
  * @param l: the ladder cache.
  * @param ladder_buff: reference ladder buffer pointer
  * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param sigtag: tag associated with the ladder
  * @return: true if the passed reference is updated,
  *          false if it is unchanged.
  */
-int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size, struct domain_name *signer_name);
+int ladder_cache_update(struct ladder_cache *l, MTLLIB_BUFFER* ladder_buff, size_t hash_size, uint8_t *sigtag, struct domain_name *signer_name);
 
 /**
  * Check to see if the ladder is currently in the ladder cache.
  * Note: This function checks the ladder IDs and all rungs match. Thus
- *       updated ladders with different rungs will reutrh false.
+ *       updated ladders with different rungs will return false.
  *
  * @param l: the ladder cache.
  * @param ref: reference ladder buffer pointer
- * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param sigtag: sigtag for the signed ladder containing the ladder
+ * @param signer_name: name the the signer who signed this ladder
  * @return: true if the ladder is in cache, false if it is not.
  */
-int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, size_t hash_size, struct domain_name *signer_name);
+int ladder_cache_ladder_exists(struct ladder_cache *l, MTLLIB_BUFFER *ref, uint8_t *sigtag, struct domain_name *signer_name);
 
 
 /**
- * Given a ladder cache and a series ID, get the cached ladder
+ * Given a ladder cache and a signature, get a cached ladder to compare against
  *
  * @param l: the ladder cache
- * @param sid: MTL series identifier
- * @param hash_size: length in bytes of the hash (aka security parameter) 
- * @return: MTLLIB_BUFFER pointer or NULL if no ladder
+ * @param sig: signature (full or condensed) to check compatibility against
+ * @param sig_len: length in bytes of the signature
+ * @return: MTLLIB_BUFFER pointer to a verified ladder compatible with the authpath of sig or NULL if no ladder
  */
-MTLLIB_BUFFER* ladder_cache_find_ladder(struct ladder_cache *l, SERIESID* sid, size_t hash_size, struct domain_name *signer_name);
+MTLLIB_BUFFER *ladder_cache_find_ladder(struct ladder_cache *l, unsigned char *sig, size_t siglen, struct domain_name *signer_name);
 
 /**
  * Clear the ladder cache entries
@@ -223,5 +237,17 @@ void ladder_cache_data_free(void *data, void *userdata);
  * @return 1 if they match and 0 if not
  */
 uint8_t ladder_cache_is_ladder_equal(MTLLIB_BUFFER *ladder_one, MTLLIB_BUFFER *ladder_two);
+
+/**
+ * Construct SigTag OPTION-DATA
+ * @param l: the ladder cache
+ * @param signer_name: the signer_name for which to search the cache for associated ladders
+ * @param option_data: buffer to fill with SigTags
+ * @return: 0 on success, 1 on failure. If successful, option-length is in_use(option_data).
+ *  If option_data is too small to hold all SigTags, the function will add as many as will fit;
+ *  This scenario is still considered a success
+ */
+uint8_t
+ladder_cache_build_sigtag(struct ladder_cache *l, struct domain_name *signer_name, MTLLIB_BUFFER *option_data);
 
 #endif /* SERVICES_CACHE_LADDER_H */

@@ -154,11 +154,11 @@ pqalgo_verify_mtl_full_signature(unsigned char *sig)
     case 1:
         return 1;
         break;
-    case 0:
+    case 2:
         return 0;
         break;
     default:
-        // This is a invalid signature...
+        // Unknown MTL_TYPE
         return 0;
     }
 }
@@ -247,9 +247,9 @@ pqalgo_verify_rrsig_mtl_raw(unsigned char *sig, size_t siglen,
     }
     mtllib_buffer_free(pubkey);
 
-    // Look for a ladder in cache that may work
+    // Look for a ladder in cache that is compatible with the condensed portion of the signature
     struct domain_name *signer_name = pqalgo_get_rrsig_signers_name(rrset);
-    MTLLIB_BUFFER* ladder = ladder_cache_find_ladder(env->ladder_cache, &sid, hash_size, signer_name);
+    MTLLIB_BUFFER* ladder = ladder_cache_find_ladder(env->ladder_cache, &sig[1], siglen-1, signer_name);
 
     if(mtllib_buffer_initialize(&rrset_buff, sldns_buffer_limit(rrset), sldns_buffer_begin(rrset))) {
         mtllib_buffer_free(rrset_buff);
@@ -346,7 +346,13 @@ pqalgo_verify_rrsig_mtl_ladder(unsigned char *sig, size_t siglen,
     }
 
     // If the ladder is already cached, then we don't need to verify the signature again
-    if (ladder_cache_ladder_exists(env->ladder_cache, ladder_buffer, hash_size, signer_name))
+    uint8_t sigtag[SIGTAG_LEN];
+    if (ladder_cache_calc_sigtag(mtllib_buffer_data_ptr(ladder_buffer), mtllib_buffer_in_use(ladder_buffer), sigtag) != 0) {
+        mtllib_buffer_free(ladder_buffer);
+        mtllib_key_free(mtl_ctx);
+        return LDNS_STATUS_MEM_ERR;
+    }
+    if (ladder_cache_ladder_exists(env->ladder_cache, ladder_buffer, sigtag, signer_name))
     {
         mtllib_key_free(mtl_ctx);
         mtllib_buffer_free(ladder_buffer);
@@ -360,7 +366,7 @@ pqalgo_verify_rrsig_mtl_ladder(unsigned char *sig, size_t siglen,
         return LDNS_STATUS_CRYPTO_BOGUS;
     }
 
-    ladder_cache_update(env->ladder_cache, ladder_buffer, hash_size, signer_name);
+    ladder_cache_update(env->ladder_cache, ladder_buffer, hash_size, sigtag, signer_name);
     mtllib_buffer_free(ladder_buffer);    
     mtllib_key_free(mtl_ctx);
 
@@ -420,8 +426,6 @@ uint8_t pqalgo_verify_rrsig_oqs_raw(unsigned char* sig, size_t siglen,
  * @param algo: Algorithm used to sign the rrsig.
  * @param env: The module environment the quere is running in.
  * @return sec_status_secure if it verifies,
- *         sec_status_extend if the condensed signature is ok
- *             but there is no ladder to validate it,
  *         sec_status_bogus if failed validatiion
  */
 uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig,
@@ -479,11 +483,6 @@ uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig,
 
             if (status != LDNS_STATUS_OK)
             {
-                if (status == LDNS_STATUS_CRYPTO_EXTEND)
-                {
-                    log_info("MTL signature (%d) - Condensed Signature Verification FAILED, insufficient information to validate.", algo);
-                    return sec_status_extend;
-                }
                 log_info("MTL signature (%d) - Condensed Signature Verification FAILED, signature BOGUS.", algo);
                 return sec_status_bogus;
             }

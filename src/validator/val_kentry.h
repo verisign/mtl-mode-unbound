@@ -89,12 +89,6 @@ struct key_entry_data {
 	uint16_t rrset_type;
 	/** if the key is bad: Bogus or malformed */
 	uint8_t isbad;
-	/** if the key need to be refetched with full MTL signature
-		should ALWAYS be accompanied with isBad
-	   	ie. if key awaiting the full signature,
-	 		it has not been verified,
-			untrusted until proven trusted*/
-	uint8_t wait_full_sig;
 };
 
 /** function for lruhash operation */
@@ -152,13 +146,6 @@ int key_entry_isgood(struct key_entry_key* kkey);
  * @return true if it is bad.
  */
 int key_entry_isbad(struct key_entry_key* kkey);
-
-/**
- * See if this entry needs to be refetched with the full MTL ladder
- * @param kkey: must have data pointer set correctly
- * @return true if it is good.
-*/
-int key_entry_needfullsig(struct key_entry_key* kkey);
 
 /**
  * Get reason why a key is bad.
@@ -224,24 +211,6 @@ struct key_entry_key* key_entry_create_rrset(struct regional* region,
  * @return new key entry or NULL on alloc failure
  */
 struct key_entry_key* key_entry_create_bad(struct regional* region,
-	uint8_t* name, size_t namelen, uint16_t dclass, time_t ttl,
-	sldns_ede_code reason_bogus, const char* reason,
-	time_t now);
-
-/**
- * Create a bad key entry awaiting full MTL ladder, in the given region.
- *   ( piggybacks off of key_entry_create_bad() )
- * @param region: where to allocate
- * @param name: the key name
- * @param namelen: length of name
- * @param dclass: class of key entry. (host order);
- * @param ttl: what ttl should the key have. relative.
- * @param reason_bogus: accompanying EDE code.
- * @param reason: accompanying NULL-terminated EDE string (or NULL).
- * @param now: current time (added to ttl).
- * @return new key entry or NULL on alloc failure
- */
-struct key_entry_key* key_entry_create_waitfullsig(struct regional* region,
 	uint8_t* name, size_t namelen, uint16_t dclass, time_t ttl,
 	sldns_ede_code reason_bogus, const char* reason,
 	time_t now);

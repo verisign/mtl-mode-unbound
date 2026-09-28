@@ -202,9 +202,6 @@ enum sec_status {
 	/** SECURE means that the object (RRset or message) validated 
 	 * according to local policy. */
 	sec_status_secure,
-	/** EXTEND means that the object (RRset or message) is missing some
-	 * information to validate, need to requery and retry validation. */
-	sec_status_extend
 };
 
 /**

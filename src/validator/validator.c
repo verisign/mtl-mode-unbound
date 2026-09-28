@@ -576,262 +576,6 @@ sentinel_get_keytag(char* start, uint16_t* keytag) {
 	return 1;
 }
 
-
-/* 
- * Generate the ladder update request
- * qstate:		query's (general) module state
- * vq:			query's validation module state
- * id:			module id
- * name:		qname to be requested
- * name_len:	size of name (as it is in wire format)
- * qclass:		qclass to be requested
- * type:		qtype to be requested
- * i:			index of the RRset's RRsig to be extended (aka vq->wait_full_sig)
- * 				Note: i / vq->vq_wait_full_sig is 1-indexed because
- *					it also pulls double duty as trigger for process_updated_ladder()
- *					(so that it still works if 0th RRset is extended)
-*/
-static int 
-request_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
-                   int id, uint8_t* name, size_t name_len, uint16_t qclass,
-				   uint16_t type, size_t i)
-{
-    struct module_qstate *newq = NULL;
-
-    vq->wait_full_sig = i+1;
-	#ifdef MTL_MODE_SOA_METHOD
-		verbose(VERB_ALGO, "Generating full signature request through SOA");
-		if (!generate_request(qstate, id, name, name_len, LDNS_RR_TYPE_SOA,
-								qclass, 0, &newq, 0))
-		{
-			verbose(VERB_ALGO, "Error generating SOA full signature request");
-			return val_error(qstate, id);
-		}
-	#elif defined(MTL_MODE_EDNS_METHOD)
-		verbose(VERB_ALGO, "Generating full signature request through EDNS option, dns query qtype %d", type);
-		qstate->full_edns = 1;
-
-		if (!generate_request(qstate, id, name, name_len, type,
-								qclass, 0, &newq, 0))
-		{
-			verbose(VERB_ALGO, "Error generating EDNS full signature request");
-			return val_error(qstate, id);
-		}					
-	#else
-		// This is an error should not get here.
-		assert(0)
-	#endif
-    
-    return 0;
-}
-
-/* 
- * Process the ladder update request
-*/
-static int 
-process_updated_ladder(struct module_qstate *qstate, struct val_qstate *vq,
-                   int id, int rcode, struct dns_msg *msg, struct sock_list *origin,
-                   struct query_info *qinfo)
-{
-    struct ub_packed_rrset_key *full_rrsig = NULL; 
-    char name_str[256];
-    uint8_t *qname;
-    uint8_t *qname_ptr;
-    size_t qname_len;
-    size_t i;
-    size_t oset;
-    uint32_t offset;
-    uint32_t buff_offset;
-    uint32_t lsig_len;
-    size_t sig_size = 0;
-    RANDOMIZER* mtl_rand = NULL;
-    AUTHPATH *auth_path = NULL; 
-    uint8_t* new_rrset = NULL;	
-    #ifdef MTL_MODE_SOA_METHOD
-        RANDOMIZER* src_rand = NULL;
-        AUTHPATH *src_path = NULL;    
-        uint16_t new_sig_len = 0; 
-    #endif
-    struct packed_rrset_data* new_prd = NULL;
-
-    const uint16_t rdata_size_field = 2;
-    const uint16_t rrsig_size_field = 18;
-    const uint8_t  mtl_sig_type_field = 1;   
-
-    qname_len = qinfo->qname_len;
-    qname = malloc(1024);
-	qname_ptr = qname;
-    memcpy(qname, qinfo->qname, qname_len);
-
-    if ((rcode == LDNS_RCODE_NOERROR) && (msg != NULL)) {
-        // Get the full response by type and name 
-		#ifdef MTL_MODE_SOA_METHOD
-			//  Beacuse we are using the SOA not the EDNS option we need to find the name
-			// for the SOA which may be a parent
-			for(i=0; i<dname_count_labels(qname)-1; i++) {
-				dname_str(qname, &name_str[0]);
-
-				full_rrsig = reply_find_rrset_section_ns(msg->rep, qname,
-													qname_len, LDNS_RR_TYPE_SOA, qinfo->qclass);            
-				if(full_rrsig != NULL) {
-					break;
-				}
-				dname_remove_label(&qname, &qname_len);       
-			}      
-		#elif defined(MTL_MODE_EDNS_METHOD)
-			full_rrsig = reply_find_rrset(msg->rep, qname, qname_len, qinfo->qtype, qinfo->qclass); 				
-		#else
-			// This is an error should not get here.
-			assert(0);
-		#endif		
-    }
-
-    if (full_rrsig != NULL) {
-        val_find_rrset_signer(full_rrsig, &qname, &qname_len);
-        dname_str(qname, &name_str[0]);
-
-        // Copy the new RRSet to the validate request
-        // In the case of the SOA method just append the ladder to the existing condensed
-        //           signature and then re-validate the rrset
-        struct packed_rrset_data *prd = (struct packed_rrset_data*)full_rrsig->entry.data;
-        for(i=prd->count; i<prd->count + prd->rrsig_count; i++) {
-            uint8_t* dptr = prd->rr_data[i];  
-            size_t dptr_len = prd->rr_len[i];  
-
-            // Verify the algorithm is appropriate byte 4
-			uint8_t validation_type_check = 0;
-			if(pqalgo_is_mtl_mode_algorithm(dptr[4])) {
-				validation_type_check = 1;
-			}			
-            if(!validation_type_check) {
-                log_info("  ERROR - Invalid signature algorithm for extended validation type (%d)", dptr[4]);
-				return 1;
-            }
-
-            offset = rdata_size_field + rrsig_size_field + qname_len + mtl_sig_type_field;
-
-            // Find the condensed signature length
-			#ifdef PQC_ALGO_MTL_ENABLED
-				MTLLIB_BUFFER* buffer = NULL;
-				mtllib_buffer_initialize(&buffer, dptr_len - offset, (char*)&dptr[offset]);
-				size_t hash_size = pqalgo_get_mtl_sec_param(dptr[4]);
-				if(hash_size == 0) {
-					log_info("  ERROR - Invalid signature algorithm for extended validation type (%d)", dptr[4]);
-					return 1;
-				}
-				sig_size = mtllib_sig_buffer_condensed_sig_len(buffer, hash_size);
-				buff_offset = offset + sig_size;
-				lsig_len = dptr_len - buff_offset;
-
-				mtl_authpath_free(auth_path);
-				mtl_randomizer_free(mtl_rand);
-			#else
-                log_info("  ERROR - Invalid signature algorithm for extended validation type (%d)", dptr[4]);
-				return 1;
-			#endif
-
-            // The ladder location and length is known. 
-			// Now need to update the original response to include that signed ladder
-            struct ub_packed_rrset_key *src = vq->orig_msg->rep->rrsets[vq->wait_full_sig-1];
-            struct packed_rrset_data *sprd = (struct packed_rrset_data*) src->entry.data;
-            for(oset=sprd->count; oset<sprd->count + sprd->rrsig_count; oset++) {
-				
-				#ifdef MTL_MODE_SOA_METHOD
-	                // Get the current signature size
-	                uint8_t *curr_sig = sprd->rr_data[oset];
-	                size_t curr_len = sprd->rr_len[oset];    
-					// Find the condensed signature size length
-					uint8_t *sig_field = curr_sig + offset;
-					size_t condensed_size = mtl_auth_path_from_buffer(sig_field,
-							curr_len,
-							16,
-							8,
-							&src_rand, &src_path);
-
-					mtl_authpath_free(src_path);
-					mtl_randomizer_free(src_rand);
-
-					/* 
-					* The new signature length and buffer size is made from 3 values
-					*    1. The length of the RRSig fields
-					*    2. The length of the condensed signature
-					*    3. The length of the signed ladder 
-					*/
-					new_sig_len = offset + condensed_size + lsig_len + 32;
-					new_rrset = calloc(1, new_sig_len);
-					if(new_rrset == NULL) {
-						free(qname_ptr);
-    					return 1;
-					}
-					uint8_t* wptr = new_rrset;
-
-					// Copy the condensed signtuare to the new RRSig 
-					// Write the existing condensed signature
-					memcpy(wptr, curr_sig, offset + condensed_size);
-					wptr += offset + condensed_size;
-
-					// Update the Length Field (not couting the length bytes)
-					new_rrset[0] = (uint8_t)(((new_sig_len - 2) >> 8) & 0xff);
-					new_rrset[1] = (uint8_t)(((new_sig_len - 2) >> 0) & 0xff);                
-
-					// Set the Full Signature flag in the RRSIG record to indicate we have a signed ladder
-					new_rrset[20 + qname_len] = 1;
-
-					// Write the full ladder with signature
-					memcpy(wptr, (char*)&dptr[buff_offset], lsig_len);
-
-					// Copy the new signed rrset to the original for validation
-					size_t pre_s = packed_rrset_sizeof(sprd);
-
-					// Allocate the new structure and copy the original over
-					new_prd = regional_alloc(qstate->region, pre_s - sprd->rr_len[oset] + new_sig_len);
-					if(new_prd == NULL) {
-						free(qname_ptr);
-						free(new_rrset);
-						return 1;
-					}
-					memcpy(new_prd, sprd, pre_s);
-					// Update the structure pointers and then copy the new signatures over
-					packed_rrset_ptr_fixup(new_prd);	
-					memcpy(new_prd->rr_data[oset], new_rrset, new_sig_len);	
-					new_prd->rr_len[oset] = new_sig_len;				
-
-				#elif defined(MTL_MODE_EDNS_METHOD)
-					size_t pre_s = packed_rrset_sizeof(sprd);
-
-					// Replace the curr_sig/curr_len with the dptr/dptr_len
-					// Allocate the new structure and copy the original over
-					new_prd = regional_alloc(qstate->region, pre_s - sprd->rr_len[oset] + dptr_len);
-					if(new_prd == NULL) {
-						free(qname_ptr);
-						free(new_rrset);
-						return 1;
-					}
-
-					memcpy(new_prd, sprd, pre_s);
-					// Update the structure pointers and then copy the new signatures over
-					packed_rrset_ptr_fixup(new_prd);	
-					memcpy(new_prd->rr_data[oset], dptr, dptr_len);	
-					new_prd->rr_len[oset] = dptr_len;										
-				#else
-					// This is an error should not get here.
-					assert(0);
-				#endif
-
-				// Switch the referenced RRSet and free the new record temporary memory
-				src->entry.data = new_prd;
-				free(new_rrset);
-            }
-        }          
-
-    }
-
-	free(qname_ptr);
-    return 0;
-}
-
-
-
 /**
  * Prime trust anchor for use.
  * Generate and dispatch a priming query for the given trust anchor.
@@ -953,13 +697,6 @@ validate_msg_signatures(struct module_qstate* qstate, struct val_qstate* vq,
 		 * message is BAD. */
         if (sec != sec_status_secure)
         {
-			if (sec == sec_status_extend)
-			{
-				*suspend = 1;
-				return request_updated_ladder(qstate, vq, id, s->rk.dname,
-											s->rk.dname_len, vq->qchase.qclass,
-											ntohs(s->rk.type), i);
-			}
 			log_nametypeclass(VERB_QUERY, "validator: response "
 				"has failed ANSWER rrset:", s->rk.dname,
 				ntohs(s->rk.type), ntohs(s->rk.rrset_class));
@@ -1006,13 +743,6 @@ validate_msg_signatures(struct module_qstate* qstate, struct val_qstate* vq,
 		 * we have a bad message. */
         if (sec != sec_status_secure)
         {
-			if (sec == sec_status_extend)
-			{
-				*suspend = 1;
-				return request_updated_ladder(qstate, vq, id, s->rk.dname,
-											s->rk.dname_len, vq->qchase.qclass,
-											ntohs(s->rk.type), i);
-			}
 			log_nametypeclass(VERB_QUERY, "validator: response "
 				"has failed AUTHORITY rrset:", s->rk.dname,
 				ntohs(s->rk.type), ntohs(s->rk.rrset_class));
@@ -3004,21 +2734,10 @@ primeResponseToKE(struct ub_packed_rrset_key* dnskey_rrset,
 	}
 	if(key_entry_isgood(kkey))
 		sec = sec_status_secure;
-	else if(key_entry_needfullsig(kkey))
-		sec = sec_status_extend;
 	else
 		sec = sec_status_bogus;
 	verbose(VERB_DETAIL, "validate keys with anchor(DS): %s", 
 		sec_status_to_string(sec));
-
-	if(sec == sec_status_extend) {
-		log_nametypeclass(VERB_OPS, "failed to prime trust anchor -- "
-			"DNSKEY requires updated MTL ladder to complete validation", 
-			ta->name, LDNS_RR_TYPE_DNSKEY, ta->dclass);
-		//in this case, we return a (the same) bad key with the wait_full_sig flag set
-		//	so process_prime_response() knows to request the updated ladder
-		return kkey;
-	}
 
 	if(sec != sec_status_secure) {
 		log_nametypeclass(VERB_OPS, "failed to prime trust anchor -- "
@@ -3497,32 +3216,10 @@ process_dnskey_response(struct module_qstate* qstate, struct val_qstate* vq,
 	if(!key_entry_isgood(vq->key_entry)) {
 		if(key_entry_isbad(vq->key_entry)) {
 			if(vq->restart_count < ve->max_restart) {
-				if(key_entry_needfullsig(vq->key_entry)) {
-					//remove if prod
-					verbose(VERB_ALGO, "process_dnskey_response(), validator.c, attempting to request_updated_ladder()");
-
-					//if the key failed validation because it doesn't have a ladder
-					//then re fetch the key with the ladder and try again
-					struct reply_info* og_reply = msg->rep;		//equivalent to "chase_reply" in validate_msg_signatures()
-					size_t dnskey_i = 0;						//equivalent to "i" in validate_msg_signatures()
-					for (dnskey_i = 0; dnskey_i < og_reply->rrset_count; dnskey_i++) {	//find index of dnskey within rrset
-						if (dnskey == (og_reply->rrsets)[dnskey_i]) {					//raw ptr (addr) comparison
-							break;									//had to do this because
-						}											//	request_updated_ladder() and process_updated_ladder()
-					}												//	only works on rrset indexes
-					assert((og_reply->rrsets)[dnskey_i] == dnskey);	//	not the ptr to the item pointed by said index itself
-					if( request_updated_ladder(qstate, vq, id,
-							dnskey->rk.dname, dnskey->rk.dname_len,
-							vq->qchase.qclass, ntohs(dnskey->rk.type),
-							dnskey_i) != 0) {
-								verbose(VERB_ALGO, "process_dnskey_response(), validator.c, unable to request_updated_ladder()");
-							}
-				} else {
-					//else key failed validation because it doesn't match RRSIG
-					//then (allow to) blacklist region
-					val_blacklist(&vq->chain_blacklist,
-						qstate->region, origin, 1);
-				}
+				//else key failed validation because it doesn't match RRSIG
+				//then (allow to) blacklist region
+				val_blacklist(&vq->chain_blacklist,
+					qstate->region, origin, 1);
 
 				qstate->errinf = NULL;
 				vq->restart_count++;
@@ -3606,26 +3303,8 @@ process_prime_response(struct module_qstate* qstate, struct val_qstate* vq,
 	if(vq->key_entry) {
 		if(key_entry_isbad(vq->key_entry) 
 			&& vq->restart_count < ve->max_restart) {
-			if(key_entry_needfullsig(vq->key_entry)) {
-				//key failed validation because it didn't have ladder, refetch key with ladder
-				struct reply_info* og_reply = msg->rep;		//equivalent to "chase_reply" in validate_msg_signatures()
-				size_t dnskey_i = 0;						//equivalent to "i" in validate_msg_signatures()
-				for (dnskey_i = 0; dnskey_i < og_reply->rrset_count; dnskey_i++) {
-					if (dnskey_rrset == (og_reply->rrsets)[dnskey_i]) {
-						break;
-					}
-				}
-				assert((og_reply->rrsets)[dnskey_i] == dnskey_rrset);	
-				if( request_updated_ladder(qstate, vq, id,
-						dnskey_rrset->rk.dname, dnskey_rrset->rk.dname_len,
-						vq->qchase.qclass, ntohs(dnskey_rrset->rk.type),
-						dnskey_i) != 0) {
-							verbose(VERB_ALGO, "process_dnskey_response(), validator.c, unable to request_updated_ladder()");
-				}		
-			} else {
 				val_blacklist(&vq->chain_blacklist, qstate->region,
 					origin, 1);
-			}
 
 			qstate->errinf = NULL;
 			vq->restart_count++;
@@ -3673,12 +3352,6 @@ val_inform_super(struct module_qstate* qstate, int id,
 		process_prime_response(super, vq, id, qstate->return_rcode,
 			qstate->return_msg, qstate->reply_origin, qstate);
 		return;
-	}
-	if(vq->wait_full_sig) {
-       process_updated_ladder(super, vq, id, qstate->return_rcode,
-                               qstate->return_msg, qstate->reply_origin, &qstate->qinfo);
-        vq->wait_full_sig = 0;
-        return;
 	}
 	if(qstate->qinfo.qtype == LDNS_RR_TYPE_DS) {
 		int suspend;

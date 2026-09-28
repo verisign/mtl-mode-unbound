@@ -16,9 +16,9 @@ PQC_DNSSEC_ALGOS unbound_pqc_val_algos[] = {
     {"HAWK",                       234, ALGO_OTHER,  DISABLED, 0, 0, NULL}, 
     {"SQISIGN",                    233, ALGO_OTHER,  DISABLED, 0, 0, NULL},
     {"Falcon-padded-512",          244, ALGO_LIBOQS, ENABLED, 897, 0, "Falcon-512"},
-    {"ML-DSA-44",                  245, ALGO_LIBOQS, ENABLED, 1312, 0, "ML-DSA-44"},
-    {"SLH-DSA-SHA2-128s",          246, ALGO_LIBOQS, ENABLED, 128, 0, "SPHINCS+-SHA2-128s-simple"},
-    {"SLH-DSA-SHAKE-128s",         247, ALGO_LIBOQS, ENABLED, 128, 0, "SPHINCS+-SHAKE-128s-simple"},
+    {"ML-DSA-44",                  18, ALGO_LIBOQS, ENABLED, 1312, 0, "ML-DSA-44"},
+    {"SLH-DSA-SHA2-128s",          246, ALGO_LIBOQS, ENABLED, 128, 0, "SLH_DSA_PURE_SHA2_128S"},
+    {"SLH-DSA-SHAKE-128s",         247, ALGO_LIBOQS, ENABLED, 128, 0, "SLH_DSA_PURE_SHAKE_128S"},
     {NULL, 0, ALGO_NONE, DISABLED}};
 
 

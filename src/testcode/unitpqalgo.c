@@ -220,13 +220,14 @@ test_pqalgo_verify_rrsig_mtl_raw()
     char labels[] = {7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
     signer_name.length = sizeof(labels);
     memcpy(signer_name.labels, labels, signer_name.length);
+    uint8_t sigtag[SIGTAG_LEN] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     // Setup a test ladder to verify the signature with   
     MTLLIB_BUFFER *test_pqctest_ladder_buffer = NULL;
     mtllib_buffer_initialize(&test_pqctest_ladder_buffer, pqctest_ladder_buffer_len, pqctest_ladder_buffer);
 
     // Initalize the ladder cache
-    unit_assert(ladder_cache_update(env->ladder_cache, test_pqctest_ladder_buffer, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(env->ladder_cache, test_pqctest_ladder_buffer, hash_size, sigtag, &signer_name) == 1);
     mtllib_buffer_free(test_pqctest_ladder_buffer);
 
     // Setup the signature buffer
@@ -301,6 +302,13 @@ test_pqalgo_verify_rrsig_mtl_raw()
                                             alg->number,
                                             env) == LDNS_STATUS_CRYPTO_EXTEND);
 
+    // Check correct calculation of sigtag
+    uint8_t sigtag_output[SIGTAG_LEN];
+    ladder_cache_calc_sigtag(&pqctest_full_sig_buffer[pqctest_condensed_sig_buffer_len], 
+                             pqctest_full_sig_buffer_len-(pqctest_condensed_sig_buffer_len), 
+                             sigtag_output);
+    unit_assert(memcmp(sigtag_output, pqctest_full_sig_sigtag, SIGTAG_LEN) == 0);
+
     sldns_buffer_free(message);
     test_setup_test_env_free(env);
 }
@@ -332,6 +340,18 @@ test_pqalgo_verify_rrsig_mtl_ladder()
                                                alg->number,
                                                env,
                                                &signer_name) == LDNS_STATUS_OK);
+    // Did the ladder get added to the cache under the correct sigtag?
+    MTLLIB_BUFFER *option_buffer;
+    mtllib_buffer_initialize(&option_buffer, SIGTAG_LEN, NULL);
+    ladder_cache_build_sigtag(env->ladder_cache, &signer_name, option_buffer);
+    unit_assert(memcmp(mtllib_buffer_data_ptr(option_buffer), pqctest_full_sig_sigtag, SIGTAG_LEN) == 0);
+    MTLLIB_BUFFER *signed_ladder;
+    mtllib_buffer_initialize(&signed_ladder, pqctest_full_sig_buffer_len-pqctest_condensed_sig_buffer_len, &pqctest_full_sig_buffer[pqctest_condensed_sig_buffer_len]);
+    unit_assert(ladder_cache_ladder_exists(env->ladder_cache, signed_ladder, pqctest_full_sig_sigtag, &signer_name) == 1);
+    mtllib_buffer_free(option_buffer);
+    mtllib_buffer_free(signed_ladder);
+
+
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(NULL,
                                                pqctest_full_sig_buffer_len,
@@ -447,7 +467,7 @@ test_pqalgo_verify_rrsig()
                                     &pqctest_pubkey_buffer[0],
                                     pqctest_pubkey_buffer_len,
                                     alg->number,
-                                    env) == sec_status_extend);
+                                    env) == sec_status_bogus);
 
     // Verify calls with bad parameters
     unit_assert(pqalgo_verify_rrsig(NULL,
@@ -524,7 +544,7 @@ test_pqalgo_verify_rrsig()
                                     &pqctest_pubkey_buffer[0],
                                     pqctest_pubkey_buffer_len,
                                     alg->number,
-                                    env) == sec_status_extend);
+                                    env) == sec_status_bogus);
     // If added to correct signer, malicious record should be otherwise valid
     MTLLIB_BUFFER *ladder;
     mtllib_buffer_initialize(&ladder, pqctest_ladder_buffer_len, pqctest_ladder_buffer);
@@ -532,7 +552,9 @@ test_pqalgo_verify_rrsig()
     char bad_labels[] = {9, 'a', 'd', 'v', 'e', 'r', 's', 'a', 'r', 'y', 3, 'c', 'o', 'm', 0};
     bad_signer_name.length = sizeof(bad_labels);
     memcpy(bad_signer_name.labels, bad_labels, bad_signer_name.length);
-    unit_assert(ladder_cache_update(env->ladder_cache, ladder, 16, &bad_signer_name) == 1);
+    uint8_t sigtag[SIGTAG_LEN];
+    memset(sigtag, 0, SIGTAG_LEN);
+    unit_assert(ladder_cache_update(env->ladder_cache, ladder, 16, sigtag, &bad_signer_name) == 1);
     unit_assert(pqalgo_verify_rrsig(bad_sig_message,
                                     &pqctest_bad_condensed_sig_buffer[0],
                                     pqctest_bad_condensed_sig_buffer_len,

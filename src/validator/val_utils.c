@@ -536,8 +536,6 @@ verify_dnskeys_with_ds_rr(struct module_env* env, struct val_env* ve,
 			i, reason, reason_bogus, LDNS_SECTION_ANSWER, qstate);
 		if(sec == sec_status_secure) {
 			return sec;
-		} else if (sec == sec_status_extend) {
-			return sec;
 		}
 		/* If it didn't validate with the DNSKEY, try the next one! */
 	}
@@ -643,8 +641,6 @@ val_verify_DNSKEY_with_DS(struct module_env* env, struct val_env* ve,
 				}
 				return sec_status_secure;
 			}
-		} else if(sec == sec_status_extend) {
-			return sec_status_extend;
 		} else if(sigalg && sec == sec_status_bogus) {
 			algo_needs_set_bogus(&needs,
 				(uint8_t)ds_get_key_algo(ds_rrset, i));
@@ -701,17 +697,6 @@ val_verify_new_DNSKEYs(struct regional* region, struct module_env* env,
 			ntohs(ds_rrset->rk.rrset_class),
 			rrset_get_ttl(ds_rrset), *reason_bogus, *reason,
 			*env->now);
-	} else if(sec == sec_status_extend) {
-		//if verification of key requires updated ladder,
-		//	return a bad key with wait_full_sig flag set indicating
-		//	that the key needs to be refetched with a full ladder
-		return key_entry_create_waitfullsig(region, ds_rrset->rk.dname,
-			ds_rrset->rk.dname_len, ntohs(ds_rrset->rk.rrset_class),
-			BOGUS_KEY_TTL, *reason_bogus, *reason, *env->now);
-		//note: we don't return a NULL key in this case
-		//	because a NULL key is only meant to be returned when
-		//	there is a "secure end" to the validation island
-		// 	(ie. unknown algorithm) (see val_utils.h)
 	}
 	return key_entry_create_bad(region, ds_rrset->rk.dname,
 		ds_rrset->rk.dname_len, ntohs(ds_rrset->rk.rrset_class),
@@ -799,9 +784,7 @@ val_verify_DNSKEY_with_TA(struct module_env* env, struct val_env* ve,
 				}
 				return sec_status_secure;
 			}
-		} else if(sec == sec_status_extend) {
-			return sec_status_extend;
-	 	} else if(sigalg && sec == sec_status_bogus) {
+		} else if(sigalg && sec == sec_status_bogus) {
 			algo_needs_set_bogus(&needs,
 				(uint8_t)ds_get_key_algo(ta_ds, i));
 		}
@@ -889,17 +872,6 @@ val_verify_new_DNSKEYs_with_ta(struct regional* region, struct module_env* env,
 			ntohs(dnskey_rrset->rk.rrset_class),
 			rrset_get_ttl(dnskey_rrset), *reason_bogus, *reason,
 			*env->now);
-	} else if(sec == sec_status_extend) {
-		//if verification of key requires updated ladder,
-		//	return a bad key with wait_full_sig flag set indicating
-		//	that the key needs to be refetched with a full ladder
-		return key_entry_create_waitfullsig(region, dnskey_rrset->rk.dname,
-			dnskey_rrset->rk.dname_len, ntohs(dnskey_rrset->rk.rrset_class),
-			BOGUS_KEY_TTL, *reason_bogus, *reason, *env->now);
-		//note: we don't return a NULL key in this case
-		//	because a NULL key is only meant to be returned when
-		//	there is a "secure end" to the validation island
-		// 	(ie. unknown algorithm) (see val_utils.h)
 	}
 	return key_entry_create_bad(region, dnskey_rrset->rk.dname,
 		dnskey_rrset->rk.dname_len, ntohs(dnskey_rrset->rk.rrset_class),
@@ -1024,7 +996,7 @@ rrset_has_signer(struct ub_packed_rrset_key* rrset, uint8_t* name, size_t len)
 	size_t i;
 	for(i = d->count; i< d->count+d->rrsig_count; i++) {
 		if(d->rr_len[i] > 2+18+len) {
-			/* at least rdatalen + signature + signame (+1 sig)*/
+			/* at least rdatalen + signature + sigtag (+1 sig)*/
 			if(!dname_valid(d->rr_data[i]+2+18, d->rr_len[i]-2-18))
 				continue;
 			if(query_dname_compare(name, d->rr_data[i]+2+18) == 0)

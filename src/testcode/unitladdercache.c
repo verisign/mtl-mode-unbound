@@ -229,6 +229,11 @@ test_ladder_cache_update(void)
     char labels[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
     signer_name.length = sizeof(labels);
     memcpy(signer_name.labels, labels, signer_name.length);
+    uint8_t i;
+    uint8_t sigtags[TEST_MAX_QUERY_NUM][SIGTAG_LEN];
+    for (i = 0; i < TEST_MAX_QUERY_NUM; i++) {
+        memset(sigtags[i], i, SIGTAG_LEN);
+    }
 
     // Initalize the cache
     lc = ladder_cache_adjust(lc, ladder_cache_cfg);
@@ -237,32 +242,38 @@ test_ladder_cache_update(void)
     unit_assert(test_ladder_cache_count_nodes(lc) == 0);
 
     // Test adding a ladder to the cache
-    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, sigtags[1], &signer_name) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 1);
 
-    // Test adding a ladder to the cache a second time - no change
-    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, &signer_name) == 2);
+    // Test adding a ladder to the cache a second time - should not change
+    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, sigtags[1], &signer_name) == 2);
     unit_assert(test_ladder_cache_count_nodes(lc) == 1);
     mtllib_buffer_free(test_ladder1);
 
-    // Test adding a modified version of the first node
-    unit_assert(ladder_cache_update(lc, test_ladder2, hash_size, &signer_name) == 1);
-    unit_assert(test_ladder_cache_count_nodes(lc) == 1);
+    // Test adding an updated version of the first node (should create a new entry)
+    unit_assert(ladder_cache_update(lc, test_ladder2, hash_size, sigtags[2], &signer_name) == 1);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 2);
     mtllib_buffer_free(test_ladder2);   
 
-    // Test adding a completely different node
-    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, &signer_name) == 1);
-    unit_assert(test_ladder_cache_count_nodes(lc) == 2);
+    // Test adding a completely different node (should create a new entry)
+    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, sigtags[3], &signer_name) == 1);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 3);
+
+    // Test adding new signature on existing node (should create a new entry)
+    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, sigtags[4], &signer_name) == 1);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 4);
 
     // Test with NULL parameters
-    unit_assert(ladder_cache_update(NULL, test_ladder3, hash_size, &signer_name) == 0);
-    unit_assert(test_ladder_cache_count_nodes(lc) == 2);
-    unit_assert(ladder_cache_update(lc, NULL, hash_size, &signer_name) == 0);
-    unit_assert(test_ladder_cache_count_nodes(lc) == 2);
-    unit_assert(ladder_cache_update(lc, test_ladder3, 0, &signer_name) == 0);
-    unit_assert(test_ladder_cache_count_nodes(lc) == 2);
-    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, NULL) == 0);
-    unit_assert(test_ladder_cache_count_nodes(lc) == 2);
+    unit_assert(ladder_cache_update(NULL, test_ladder3, hash_size, sigtags[0], &signer_name) == 0);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 4);
+    unit_assert(ladder_cache_update(lc, NULL, hash_size, sigtags[0], &signer_name) == 0);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 4);
+    unit_assert(ladder_cache_update(lc, test_ladder3, 0, sigtags[0], &signer_name) == 0);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 4);
+    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, NULL, &signer_name) == 0);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 4);
+    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, sigtags[0], NULL) == 0);
+    unit_assert(test_ladder_cache_count_nodes(lc) == 4);
 
     mtllib_buffer_free(test_ladder3);
     ladder_cache_delete(lc);
@@ -288,6 +299,11 @@ test_ladder_cache_ladder_exists(void)
     char labels2[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'n', 'e', 't', 0};
     signer_name2.length = sizeof(labels2);
     memcpy(signer_name2.labels, labels2, signer_name2.length);
+    uint8_t i;
+    uint8_t sigtags[TEST_MAX_QUERY_NUM][SIGTAG_LEN];
+    for (i = 0; i < TEST_MAX_QUERY_NUM; i++) {
+        memset(sigtags[i], i, SIGTAG_LEN);
+    }
 
     // Initalize the cache
     lc = ladder_cache_adjust(lc, ladder_cache_cfg);
@@ -296,41 +312,53 @@ test_ladder_cache_ladder_exists(void)
     unit_assert(test_ladder_cache_count_nodes(lc) == 0);
 
     // Add a test ladder to the cache
-    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, sigtags[1], &signer_name) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 1);
 
     // Test with one ladder in cache
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, hash_size, &signer_name) == 1);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, hash_size, &signer_name) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, hash_size, &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[1], &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[2], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[3], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[0], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[0], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[0], &signer_name) == 0);
 
     // Add a second ladder to the cache
-    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, sigtags[3], &signer_name) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 2);
 
     // Test with two ladders in cache
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, hash_size, &signer_name) == 1);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, hash_size, &signer_name) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[1], &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[2], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[3], &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[0], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[0], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[0], &signer_name) == 0);
     
     // Test signer binding
-    unit_assert(ladder_cache_update(lc, test_ladder2, hash_size, &signer_name2) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder2, hash_size, sigtags[2], &signer_name2) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 3);
 
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, hash_size, &signer_name) == 1);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, hash_size, &signer_name) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[1], &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[2], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[3], &signer_name) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[0], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[0], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[0], &signer_name) == 0);
 
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, hash_size, &signer_name2) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, hash_size, &signer_name2) == 1);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, hash_size, &signer_name2) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[1], &signer_name2) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[2], &signer_name2) == 1);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[3], &signer_name2) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[0], &signer_name2) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder2, sigtags[0], &signer_name2) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder3, sigtags[0], &signer_name2) == 0);
 
 
     // Test with null parameters
-    unit_assert(ladder_cache_ladder_exists(NULL, test_ladder1, hash_size, &signer_name) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, NULL, hash_size, &signer_name) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, 0, &signer_name) == 0);
-    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, hash_size, NULL) == 0);
+    unit_assert(ladder_cache_ladder_exists(NULL, test_ladder1, sigtags[1], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, NULL, sigtags[1], &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, NULL, &signer_name) == 0);
+    unit_assert(ladder_cache_ladder_exists(lc, test_ladder1, sigtags[1], NULL) == 0);
 
     mtllib_buffer_free(test_ladder1);
     mtllib_buffer_free(test_ladder2);
@@ -350,9 +378,13 @@ test_ladder_cache_find_ladder(void)
     SERIESID sid;
     size_t hash_size = 16;
     struct domain_name signer_name;
+    uint8_t placeholder[32];
+    uint8_t *test_sig_buffer;
+    size_t test_sig_buffer_len;
     char labels[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
     signer_name.length = sizeof(labels);
     memcpy(signer_name.labels, labels, signer_name.length);
+    uint8_t sigtag[SIGTAG_LEN] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 
     // Initalize the cache
     lc = ladder_cache_adjust(lc, ladder_cache_cfg);
@@ -361,17 +393,31 @@ test_ladder_cache_find_ladder(void)
     unit_assert(test_ladder_cache_count_nodes(lc) == 0);
 
     // Add a test ladder to the cache
-    unit_assert(ladder_cache_update(lc, test_ladder, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder, hash_size, sigtag, &signer_name) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 1);
 
     ladder_buffer_get_sid(test_ladder, hash_size, &sid);
+    AUTHPATH test_sig = {
+	    .flags = 0,
+	    .sid = sid,
+	    .leaf_index = 4,
+	    .rung_left = 4,
+	    .rung_right = 5,
+	    .sibling_hash_count = 1,
+	    .sibling_hash = placeholder,
+    };
+    RANDOMIZER r = {
+        .length = 16,
+        .value = placeholder,
+    };
+    test_sig_buffer_len = mtl_auth_path_to_buffer(&r, &test_sig, 16, &test_sig_buffer);
 
     // Test for existing ID
-    unit_assert(ladder_cache_find_ladder(lc, &sid, hash_size, &signer_name) != NULL);
+    unit_assert(ladder_cache_find_ladder(lc, test_sig_buffer, test_sig_buffer_len, &signer_name) != NULL);
 
     // Test for non-existing ID
-    sid.id[4] = 0x44;
-    unit_assert(ladder_cache_find_ladder(lc, &sid, hash_size, &signer_name) == NULL);
+    test_sig_buffer[4] = 0x44;
+    unit_assert(ladder_cache_find_ladder(lc, test_sig_buffer, test_sig_buffer_len, &signer_name) == NULL);
     
     mtllib_buffer_free(test_ladder);
 }
@@ -392,6 +438,11 @@ test_ladder_cache_clear(void)
     char labels[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
     signer_name.length = sizeof(labels);
     memcpy(signer_name.labels, labels, signer_name.length);
+    uint8_t i;
+    uint8_t sigtags[TEST_MAX_QUERY_NUM][SIGTAG_LEN];
+    for (i = 0; i < TEST_MAX_QUERY_NUM; i++) {
+        memset(sigtags[i], i, SIGTAG_LEN);
+    }
 
     // Initalize the cache
     lc = ladder_cache_adjust(lc, ladder_cache_cfg);
@@ -400,11 +451,11 @@ test_ladder_cache_clear(void)
     unit_assert(test_ladder_cache_count_nodes(lc) == 0);
 
     // Add a test ladder to the cache
-    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder1, hash_size, sigtags[0], &signer_name) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 1);
 
     // Add a second ladder to the cache
-    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, &signer_name) == 1);
+    unit_assert(ladder_cache_update(lc, test_ladder3, hash_size, sigtags[1], &signer_name) == 1);
     unit_assert(test_ladder_cache_count_nodes(lc) == 2);
 
     // Test clearing the cache
@@ -453,6 +504,10 @@ test_ladder_cache_touch(void)
          {0x0c, 0x84, 0x08, 0xd2, 0xce, 0x25, 0xf0, 0x4a}};
     size_t hash_size = TEST_SID_LENGTH / 2;  
     SERIESID sid;
+    uint8_t sigtags[TEST_MAX_QUERY_NUM][SIGTAG_LEN];
+    for (i = 0; i < TEST_MAX_QUERY_NUM; i++) {
+        memset(sigtags[i], i, SIGTAG_LEN);
+    }
 
     // Initalize the cache
     lc = ladder_cache_adjust(lc, ladder_cache_cfg);
@@ -462,12 +517,12 @@ test_ladder_cache_touch(void)
 
     for(i=0; i<12; i++) {
         memcpy(&test_ladder->buffer_data[6],&sids[i], TEST_SID_LENGTH);
-        unit_assert(ladder_cache_update(lc, test_ladder, hash_size, &signer_name) == 1);
+        unit_assert(ladder_cache_update(lc, test_ladder, hash_size, sigtags[i], &signer_name) == 1);
     }
 
     // Check the LRU Table
     ladder_buffer_get_sid(test_ladder, hash_size, &sid);
-    h = hashlittle(&sid.id, sid.length, 0xaa);
+    h = hashlittle(&signer_name.labels, signer_name.length, 0xaa);
     struct lruhash *table = slabhash_gettable(&lc->table, h);
 
     struct lruhash_entry *last = table->lru_end;
@@ -500,15 +555,15 @@ test_ladder_cache_sizefunc(void)
     MTLLIB_BUFFER *test_ladder1 = test_ladder_cache_setup_ladder(1);
     MTLLIB_BUFFER *test_ladder2 = test_ladder_cache_setup_ladder(2);
     // Cache Ladder Function Size is the sum of the following:
-    //    LRU Key Size        (432 bytes)
-    //    * SID                 (66 bytes + 2 alignment bytes)
+    //    LRU Key Size        (400 bytes)
+    //    * TAG                 (32 bytes)
     //    * Domain              (257 bytes + 3 alignment bytes)
-    //    * LRU Entry           (104 bytes)
+    //    * LRU Entry           (104 bytes + 4 alignment bytes)
     //    MTLLIB_BUFFER Size  (32 bytes)
     //    MTLIB Signed Buffer (TBD bytes) - See draft-kaizer-dnsop-ml-dsa-mtl-dnssec specification for this size
     //    LRU Lock Size       (0 bytes)
-    const size_t test_ladder1_size = 464 + test_ladder1->buffer_position;  
-    const size_t test_ladder2_size = 464 + test_ladder2->buffer_position;
+    const size_t test_ladder1_size = 432 + test_ladder1->buffer_position;  
+    const size_t test_ladder2_size = 432 + test_ladder2->buffer_position;
     size_t hash_size = 16;
     SERIESID sid;
 
@@ -536,16 +591,14 @@ test_ladder_cache_compare(void)
 {
     struct ladder_cache_key test1;
     struct ladder_cache_key test2;
-    uint8_t sid1[] = {0x36, 0xbd, 0xb6, 0xb3, 0xb4, 0x25, 0xed, 0x90};
-    uint8_t sid2[] = {0x36, 0xbd, 0xb8, 0xb3, 0xb4, 0x25, 0xed, 0xaa, 0x29, 0x11};
+    uint8_t tag1[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f};
+    uint8_t tag2[] = {0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8, 0xf7, 0xf6, 0xf5, 0xf4, 0xf3, 0xf2, 0xf1, 0xf0, 0xef, 0xee, 0xed, 0xec, 0xeb, 0xea, 0xe9, 0xe8, 0xe7, 0xe6, 0xe5, 0xe4, 0xe3, 0xe2, 0xe1, 0xe0};
     char labels1[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
     char labels2[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'n', 'e', 't', 0};
 
-    test1.sid.length = 8;
-    memcpy(&test1.sid.id, &sid1[0], test1.sid.length);
+    memcpy(&test1.tag, &tag1[0], SIGTAG_LEN);
 
-    test2.sid.length = 8;
-    memcpy(&test2.sid.id, &sid1[0], test2.sid.length);
+    memcpy(&test2.tag, &tag1[0], SIGTAG_LEN);
 
     test1.signer_name.length = sizeof(labels1);
     memcpy(test1.signer_name.labels, labels1, test1.signer_name.length);
@@ -556,15 +609,8 @@ test_ladder_cache_compare(void)
     // Test the same thing
     unit_assert(ladder_cache_compare(&test1, &test2) == 0);
 
-    // Test different lengths
-    test2.sid.length = 10;
-    memcpy(&test2.sid.id, &sid2[0], test2.sid.length);
-    unit_assert(ladder_cache_compare(&test1, &test2) == -1);
-    unit_assert(ladder_cache_compare(&test2, &test1) == 1);
-
-    // Test different SIDS
-    test2.sid.length = 8;
-    memcpy(&test2.sid.id, &sid2[0], test2.sid.length);
+    // Test different tags
+    memcpy(&test2.tag, &tag2[0], SIGTAG_LEN);
     unit_assert(ladder_cache_compare(&test1, &test2) == -1);
     unit_assert(ladder_cache_compare(&test2, &test1) == 1);
 
@@ -684,14 +730,23 @@ test_ladder_cache_full_operation(void)
          {0xd1, 0x98, 0xeb, 0x23, 0x20, 0xd1, 0xd3, 0x16},
          {0x8b, 0xda, 0x2d, 0xf5, 0xe7, 0x48, 0x10, 0x7c},
          {0x2b, 0xd9, 0xf2, 0x99, 0xc4, 0x1d, 0xea, 0x6d}};
-    uint8_t node_count[TEST_MAX_QUERY_NUM] =
-        {1, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6};
     size_t hash_size = 16;
 
-    struct domain_name signer_name;
-    char labels[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
-    signer_name.length = sizeof(labels);
-    memcpy(signer_name.labels, labels, signer_name.length);
+    struct domain_name signer_names[2] = {     // Labels that hash to different buckets
+        { .labels = {1, 'a', 3, 'c', 'o', 'm', 0}, .length = 7},
+        { .labels = {1, 'f', 3, 'c', 'o', 'm', 0}, .length = 7},
+    };
+    uint8_t sigtags[TEST_MAX_QUERY_NUM][SIGTAG_LEN];
+    for (i = 0; i < TEST_MAX_QUERY_NUM; i++) {
+        memset(sigtags[i], i, SIGTAG_LEN);
+    }
+
+    uint8_t expected_node_count[TEST_MAX_QUERY_NUM] =
+        {1, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6};
+    uint8_t bucket_input_list[TEST_MAX_QUERY_NUM] =
+        {0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1};
+
+
 
     cfg->ladder_cache_size = 4096;
     cfg->ladder_cache_slabs = 2;
@@ -708,14 +763,104 @@ test_ladder_cache_full_operation(void)
         memcpy(&test_ladder->buffer_data[2], sids[i], TEST_SID_LENGTH);
 
         // Add the ladder to the cache
-        unit_assert(ladder_cache_update(lc, test_ladder, hash_size, &signer_name) == 1);
-        unit_assert(test_ladder_cache_count_nodes(lc) == node_count[i]);
+        unit_assert(ladder_cache_update(lc, test_ladder, hash_size, sigtags[i], &signer_names[bucket_input_list[i]]) == 1);
+        unit_assert(test_ladder_cache_count_nodes(lc) == expected_node_count[i]);
     }
 
     mtllib_buffer_free(test_ladder);
     ladder_cache_delete(lc);
     config_delete(cfg);
 }
+
+
+/** Test retrieving SigTags */
+static void
+test_ladder_cache_sigtag(void) {
+    uint8_t hash_size = 16;
+    MTLLIB_BUFFER *option_data = NULL;
+    #define TEST_LADDER_LEN (2 + 32 + 2 + (32 * 2))
+    struct domain_name signer_names[4] = {     
+        { .labels = {1, 'a', 3, 'c', 'o', 'm', 0}, .length = 7},
+        { .labels = {1, 'b', 3, 'c', 'o', 'm', 0}, .length = 7}, // Hashes to same bucket
+        { .labels = {1, 'f', 3, 'c', 'o', 'm', 0}, .length = 7}, // Hashes to different bucket
+        { .labels = {1, 'g', 3, 'c', 'o', 'm', 0}, .length = 7}, // Uncached domain
+    };
+    uint8_t ladder[TEST_LADDER_LEN]; // SID and 2 rungs
+    MTLLIB_BUFFER *ladder_buff;
+    mtllib_buffer_initialize(&ladder_buff, TEST_LADDER_LEN, ladder);
+    uint8_t i;
+    uint8_t sigtags[TEST_MAX_QUERY_NUM][SIGTAG_LEN];
+    for (i = 0; i < TEST_MAX_QUERY_NUM; i++) {
+        memset(sigtags[i], i, SIGTAG_LEN);
+    }
+
+    struct config_file *cfg = config_create();
+    cfg->ladder_cache_slabs = 2;
+    struct ladder_cache *lc = ladder_cache_create(cfg);
+
+
+    // Add test ladders 
+    memset(ladder, 1, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    ladder_cache_update(lc, ladder_buff, hash_size, sigtags[1], &signer_names[0]);
+
+    memset(ladder, 2, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    ladder_cache_update(lc, ladder_buff, hash_size, sigtags[2], &signer_names[1]);
+
+    memset(ladder, 3, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    ladder_cache_update(lc, ladder_buff, hash_size, sigtags[3], &signer_names[2]);
+
+    memset(ladder, 4, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    ladder_cache_update(lc, ladder_buff, hash_size, sigtags[4], &signer_names[0]);
+
+    uint8_t expected_1[] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+                            4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4};
+    uint8_t expected_2[] = {4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+                            1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}; // Order of SigTags depends on cache state; both considered correct
+
+    // Normal operation
+    mtllib_buffer_initialize(&option_data, 3*SIGTAG_LEN, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, &signer_names[0], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 2*SIGTAG_LEN);
+    unit_assert((memcmp(mtllib_buffer_data_ptr(option_data), expected_1, 2*SIGTAG_LEN) == 0) || (memcmp(mtllib_buffer_data_ptr(option_data), expected_2, 2*SIGTAG_LEN) == 0));
+    mtllib_buffer_free(option_data);
+
+    // Truncated buffer
+    mtllib_buffer_initialize(&option_data, 1.5*SIGTAG_LEN, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, &signer_names[0], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 1*SIGTAG_LEN);
+    unit_assert((memcmp(mtllib_buffer_data_ptr(option_data), expected_1, 1*SIGTAG_LEN) == 0) || (memcmp(mtllib_buffer_data_ptr(option_data), expected_2, 1*SIGTAG_LEN) == 0));
+    mtllib_buffer_free(option_data);
+
+    mtllib_buffer_initialize(&option_data, 0.5*SIGTAG_LEN, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, &signer_names[0], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 0);
+    mtllib_buffer_free(option_data);
+
+    // No cached ladder found
+    mtllib_buffer_initialize(&option_data, 3*SIGTAG_LEN, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, &signer_names[3], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 0);
+    mtllib_buffer_free(option_data);
+
+
+    // Null checks
+    mtllib_buffer_initialize(&option_data, 3*SIGTAG_LEN, NULL);
+    unit_assert(ladder_cache_build_sigtag(NULL, &signer_names[0], option_data) == 1);
+    unit_assert(ladder_cache_build_sigtag(lc, NULL, option_data) == 1);
+    unit_assert(ladder_cache_build_sigtag(lc, &signer_names[0], NULL) == 1);
+    unit_assert(mtllib_buffer_in_use(option_data) == 0);
+    mtllib_buffer_free(option_data);
+
+}
+
 
 /** test post-quantum MTL code */
 void ladder_cache_test(void)
@@ -737,6 +882,7 @@ void ladder_cache_test(void)
     test_ladder_cache_find_ladder();
     test_ladder_cache_update();
     test_ladder_cache_full_operation();
+    test_ladder_cache_sigtag();
     
     config_delete(ladder_cache_cfg);
 }
