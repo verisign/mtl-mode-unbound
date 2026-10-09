@@ -54,8 +54,7 @@
 #include "sldns/rrdef.h"
 #include "sldns/keyraw.h"
 
-#include "unitpqalgo_full_sig.h"
-#include "unitpqalgo_condensed_sig.h"
+#include "unitpqalgo_mtl_sig.h"
 
 #include "util/data/packed_rrset.h"
 #include "validator/val_pqalgo.h"
@@ -217,13 +216,17 @@ test_pqalgo_verify_rrsig_mtl_raw()
     size_t hash_size = 16;
     sldns_buffer *message;
     struct module_env *env = test_setup_test_env();
+    struct domain_name signer_name;
+    char labels[] = {7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
+    signer_name.length = sizeof(labels);
+    memcpy(signer_name.labels, labels, signer_name.length);
 
     // Setup a test ladder to verify the signature with   
     MTLLIB_BUFFER *test_pqctest_ladder_buffer = NULL;
     mtllib_buffer_initialize(&test_pqctest_ladder_buffer, pqctest_ladder_buffer_len, pqctest_ladder_buffer);
 
     // Initalize the ladder cache
-    unit_assert(ladder_cache_update(env->ladder_cache, test_pqctest_ladder_buffer, hash_size) == 1);
+    unit_assert(ladder_cache_update(env->ladder_cache, test_pqctest_ladder_buffer, hash_size, &signer_name) == 1);
     mtllib_buffer_free(test_pqctest_ladder_buffer);
 
     // Setup the signature buffer
@@ -231,7 +234,7 @@ test_pqalgo_verify_rrsig_mtl_raw()
     sldns_buffer_write(message, &pqctest_message_buffer[0], pqctest_message_buffer_len);
 
     // Get the algorithm properties including ID
-    PQC_DNSSEC_ALGOS* alg = val_algo_props("SLH-DSA-SHAKE-128s-MTL-SHAKE-128");
+    PQC_DNSSEC_ALGOS* alg = val_algo_props("ML-DSA-44-MTL-SHAKE-128");
     unit_assert(alg != NULL);
 
     // Verify the raw signature verifies with correct parameters
@@ -309,9 +312,14 @@ static void
 test_pqalgo_verify_rrsig_mtl_ladder()
 {
     struct module_env *env = test_setup_test_env();
+    struct domain_name signer_name;
+    char labels[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
+    signer_name.length = sizeof(labels);
+    memcpy(signer_name.labels, labels, signer_name.length);
+
 
     // Get the algorithm properties including ID
-    PQC_DNSSEC_ALGOS* alg = val_algo_props("SLH-DSA-SHAKE-128s-MTL-SHAKE-128");
+    PQC_DNSSEC_ALGOS* alg = val_algo_props("ML-DSA-44-MTL-SHAKE-128");
     unit_assert(alg != NULL);
     PQC_DNSSEC_ALGOS* alg_sha = val_algo_props("SLH-DSA-SHA2-128s-MTL-SHA2-128");
     unit_assert(alg_sha != NULL);
@@ -322,63 +330,72 @@ test_pqalgo_verify_rrsig_mtl_ladder()
                                                &pqctest_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
-                                               env) == LDNS_STATUS_OK);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_OK);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(NULL,
                                                pqctest_full_sig_buffer_len,
                                                &pqctest_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                0,
                                                &pqctest_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                1024,
                                                &pqctest_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
-                                               env) != LDNS_STATUS_OK);
+                                               env,
+                                               &signer_name) != LDNS_STATUS_OK);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                pqctest_full_sig_buffer_len,
                                                NULL,
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                pqctest_full_sig_buffer_len,
                                                &pqctest_pubkey_buffer[0],
                                                0,
                                                alg->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                pqctest_full_sig_buffer_len,
                                                &pqctest_pubkey_buffer[0],
                                                16,
                                                alg->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                pqctest_full_sig_buffer_len,
                                                &pqctest_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg_sha->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                pqctest_full_sig_buffer_len,
                                                &pqctest_bad_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
-                                               env) == LDNS_STATUS_CRYPTO_BOGUS);
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
     ladder_cache_clear(env->ladder_cache);
     test_setup_test_env_free(env);
 }
@@ -390,13 +407,16 @@ static void
 test_pqalgo_verify_rrsig()
 {
     sldns_buffer *sig_message = NULL;
+    sldns_buffer *bad_sig_message = NULL;
     struct module_env *env = test_setup_test_env();
 
     // Setup the signature buffer
     sig_message = sldns_buffer_new(pqctest_message_buffer_len);
     sldns_buffer_write(sig_message, &pqctest_message_buffer[0], pqctest_message_buffer_len);
+    bad_sig_message = sldns_buffer_new(pqctest_bad_message_buffer_len);
+    sldns_buffer_write(bad_sig_message, &pqctest_bad_message_buffer[0], pqctest_bad_message_buffer_len);
 
-    PQC_DNSSEC_ALGOS* alg = val_algo_props("SLH-DSA-SHAKE-128s-MTL-SHAKE-128");
+    PQC_DNSSEC_ALGOS* alg = val_algo_props("ML-DSA-44-MTL-SHAKE-128");
     unit_assert(alg != NULL);
     PQC_DNSSEC_ALGOS* alg_sha = val_algo_props("SLH-DSA-SHA2-128s-MTL-SHA2-128");
     unit_assert(alg_sha != NULL);
@@ -483,6 +503,13 @@ test_pqalgo_verify_rrsig()
                                     env) == sec_status_bogus);
     // Verify secure even though bad key because of cached ladder
     //    and condensed signature
+    pqalgo_verify_rrsig(sig_message,        // Add ladder to cache
+                                    &pqctest_full_sig_buffer[0],
+                                    pqctest_full_sig_buffer_len,
+                                    &pqctest_pubkey_buffer[0],
+                                    pqctest_pubkey_buffer_len,
+                                    alg->number,
+                                    env);
     unit_assert(pqalgo_verify_rrsig(sig_message,
                                     &pqctest_condensed_sig_buffer[0],
                                     pqctest_condensed_sig_buffer_len,
@@ -490,6 +517,31 @@ test_pqalgo_verify_rrsig()
                                     pqctest_pubkey_buffer_len,
                                     alg->number,
                                     env) == sec_status_secure);
+    // Must not allow smuggling out-of-bailiwick records
+    unit_assert(pqalgo_verify_rrsig(bad_sig_message,
+                                    &pqctest_bad_condensed_sig_buffer[0],
+                                    pqctest_bad_condensed_sig_buffer_len,
+                                    &pqctest_pubkey_buffer[0],
+                                    pqctest_pubkey_buffer_len,
+                                    alg->number,
+                                    env) == sec_status_extend);
+    // If added to correct signer, malicious record should be otherwise valid
+    MTLLIB_BUFFER *ladder;
+    mtllib_buffer_initialize(&ladder, pqctest_ladder_buffer_len, pqctest_ladder_buffer);
+    struct domain_name bad_signer_name;
+    char bad_labels[] = {9, 'a', 'd', 'v', 'e', 'r', 's', 'a', 'r', 'y', 3, 'c', 'o', 'm', 0};
+    bad_signer_name.length = sizeof(bad_labels);
+    memcpy(bad_signer_name.labels, bad_labels, bad_signer_name.length);
+    unit_assert(ladder_cache_update(env->ladder_cache, ladder, 16, &bad_signer_name) == 1);
+    unit_assert(pqalgo_verify_rrsig(bad_sig_message,
+                                    &pqctest_bad_condensed_sig_buffer[0],
+                                    pqctest_bad_condensed_sig_buffer_len,
+                                    &pqctest_pubkey_buffer[0],
+                                    pqctest_pubkey_buffer_len,
+                                    alg->number,
+                                    env) == sec_status_secure);
+
+
     sldns_buffer_free(sig_message);
     test_setup_test_env_free(env);
 }

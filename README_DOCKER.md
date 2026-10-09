@@ -1,7 +1,7 @@
 # PQC Unbound Docker Images
-The PQC Unbound image is dependent on the MTL Mode base image which consists of MTL Mode (version 1.2.0), OpenSSL (version 3.5.0+) and LibOQS (version 0.14.0+).
+The PQC Unbound image is dependent on the MTL Mode base image which consists of MTL Mode (version 1.3.0), OpenSSL (version 3.5.0+) and LibOQS (version 0.16.0+).
 
-That base image can be built using the MTL repository: (https://github.com/verisign/MTL) using branch v1.2.0
+That base image can be built using the MTL repository: (https://github.com/verisign/MTL) using branch v1.3.0
 
 ## Building
 The MTL Mode container is built using docker and defaults to enabling several underlying signature schemes listed in [README_SCHEMES.md](./README_SCHEMES.md).
