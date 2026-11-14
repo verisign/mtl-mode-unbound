@@ -321,6 +321,10 @@ test_pqalgo_verify_rrsig_mtl_ladder()
     // Get the algorithm properties including ID
     PQC_DNSSEC_ALGOS* alg = val_algo_props("ML-DSA-44-MTL-SHAKE-128");
     unit_assert(alg != NULL);
+    PQC_DNSSEC_ALGOS* alg_base = val_algo_props("ML-DSA-44");
+    unit_assert(alg != NULL);
+    PQC_DNSSEC_ALGOS* alg_lvl5 = val_algo_props("ML-DSA-87-MTL-SHAKE-256");
+    unit_assert(alg != NULL);
     PQC_DNSSEC_ALGOS* alg_sha = val_algo_props("SLH-DSA-SHA2-128s-MTL-SHA2-128");
     unit_assert(alg_sha != NULL);
 
@@ -391,6 +395,22 @@ test_pqalgo_verify_rrsig_mtl_ladder()
     ladder_cache_clear(env->ladder_cache);
     unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
                                                pqctest_full_sig_buffer_len,
+                                               &pqctest_pubkey_buffer[0],
+                                               pqctest_pubkey_buffer_len,
+                                               alg_base->number,
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
+    ladder_cache_clear(env->ladder_cache);
+    unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
+                                               pqctest_full_sig_buffer_len,
+                                               &pqctest_pubkey_buffer[0],
+                                               pqctest_pubkey_buffer_len,
+                                               alg_lvl5->number,
+                                               env,
+                                               &signer_name) == LDNS_STATUS_CRYPTO_BOGUS);
+    ladder_cache_clear(env->ladder_cache);
+    unit_assert(pqalgo_verify_rrsig_mtl_ladder(&pqctest_full_sig_buffer[0],
+                                               pqctest_full_sig_buffer_len,
                                                &pqctest_bad_pubkey_buffer[0],
                                                pqctest_pubkey_buffer_len,
                                                alg->number,
@@ -447,7 +467,7 @@ test_pqalgo_verify_rrsig()
                                     &pqctest_pubkey_buffer[0],
                                     pqctest_pubkey_buffer_len,
                                     alg->number,
-                                    env) == sec_status_extend);
+                                    env) == sec_status_bogus);
 
     // Verify calls with bad parameters
     unit_assert(pqalgo_verify_rrsig(NULL,
@@ -524,7 +544,7 @@ test_pqalgo_verify_rrsig()
                                     &pqctest_pubkey_buffer[0],
                                     pqctest_pubkey_buffer_len,
                                     alg->number,
-                                    env) == sec_status_extend);
+                                    env) == sec_status_bogus);
     // If added to correct signer, malicious record should be otherwise valid
     MTLLIB_BUFFER *ladder;
     mtllib_buffer_initialize(&ladder, pqctest_ladder_buffer_len, pqctest_ladder_buffer);

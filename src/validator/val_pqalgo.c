@@ -420,8 +420,6 @@ uint8_t pqalgo_verify_rrsig_oqs_raw(unsigned char* sig, size_t siglen,
  * @param algo: Algorithm used to sign the rrsig.
  * @param env: The module environment the quere is running in.
  * @return sec_status_secure if it verifies,
- *         sec_status_extend if the condensed signature is ok
- *             but there is no ladder to validate it,
  *         sec_status_bogus if failed validatiion
  */
 uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig,
@@ -479,11 +477,6 @@ uint8_t pqalgo_verify_rrsig(sldns_buffer *buf, unsigned char *sig,
 
             if (status != LDNS_STATUS_OK)
             {
-                if (status == LDNS_STATUS_CRYPTO_EXTEND)
-                {
-                    log_info("MTL signature (%d) - Condensed Signature Verification FAILED, insufficient information to validate.", algo);
-                    return sec_status_extend;
-                }
                 log_info("MTL signature (%d) - Condensed Signature Verification FAILED, signature BOGUS.", algo);
                 return sec_status_bogus;
             }
