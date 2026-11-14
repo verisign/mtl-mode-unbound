@@ -747,7 +747,7 @@ dname_remove_labels(uint8_t** dname, size_t* len, int n)
 }
 
 int 
-dname_signame_label_count(uint8_t* dname)
+dname_sigtag_label_count(uint8_t* dname)
 {
 	uint8_t lablen;
 	int count = 0;

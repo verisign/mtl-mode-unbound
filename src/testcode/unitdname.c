@@ -475,23 +475,23 @@ dname_test_removelabel(void)
 	unit_assert( l == 1 );
 }
 
-/** test dname_signame_label_count */
+/** test dname_sigtag_label_count */
 static void
 dname_test_sigcount(void)
 {
-	unit_show_func("util/data/dname.c", "dname_signame_label_count");
-	unit_assert(dname_signame_label_count((uint8_t*)"\000") == 0);
-	unit_assert(dname_signame_label_count((uint8_t*)"\001*\000") == 0);
-	unit_assert(dname_signame_label_count((uint8_t*)"\003xom\000") == 1);
-	unit_assert(dname_signame_label_count(
+	unit_show_func("util/data/dname.c", "dname_sigtag_label_count");
+	unit_assert(dname_sigtag_label_count((uint8_t*)"\000") == 0);
+	unit_assert(dname_sigtag_label_count((uint8_t*)"\001*\000") == 0);
+	unit_assert(dname_sigtag_label_count((uint8_t*)"\003xom\000") == 1);
+	unit_assert(dname_sigtag_label_count(
 		(uint8_t*)"\001*\003xom\000") == 1);
-	unit_assert(dname_signame_label_count(
+	unit_assert(dname_sigtag_label_count(
 		(uint8_t*)"\007example\003xom\000") == 2);
-	unit_assert(dname_signame_label_count(
+	unit_assert(dname_sigtag_label_count(
 		(uint8_t*)"\001*\007example\003xom\000") == 2);
-	unit_assert(dname_signame_label_count(
+	unit_assert(dname_sigtag_label_count(
 		(uint8_t*)"\003www\007example\003xom\000") == 3);
-	unit_assert(dname_signame_label_count(
+	unit_assert(dname_sigtag_label_count(
 		(uint8_t*)"\001*\003www\007example\003xom\000") == 3);
 }
 

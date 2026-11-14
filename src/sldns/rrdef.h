@@ -398,21 +398,6 @@ enum sldns_enum_algorithm
 #ifdef PQC_ALGO_SLH_DSA_SHAKE
         LDNS_SLH_DSA_SHAKE_128s = PQC_ALGO_SLH_DSA_SHAKE,
 #endif
-#ifdef PQC_ALGO_MAYO_1
-        LDNS_MAYO_1 = PQC_ALGO_MAYO_1,
-#endif
-#ifdef PQC_ALGO_MAYO_2
-        LDNS_MAYO_2 = PQC_ALGO_MAYO_2,
-#endif
-#ifdef PQC_ALGO_SNOVA
-        LDNS_SNOVA_24_5_4 = PQC_ALGO_SNOVA,
-#endif
-#ifdef PQC_ALGO_SQISIGN
-        LDNS_SQISIGN_LVL1 = PQC_ALGO_SQISIGN,
-#endif
-#ifdef PQC_ALGO_HAWK
-        LDNS_HAWK_512 = PQC_ALGO_HAWK,
-#endif			
         LDNS_INDIRECT           = 252,
         LDNS_PRIVATEDNS         = 253,
         LDNS_PRIVATEOID         = 254
@@ -467,7 +452,7 @@ enum sldns_enum_edns_option
 	LDNS_EDNS_PADDING = 12, /* RFC7830 */
 	LDNS_EDNS_EDE = 15, /* RFC8914 */
 	LDNS_EDNS_CLIENT_TAG = 16, /* draft-bellis-dnsop-edns-tags-01 */
-	LDNS_EDNS_MTL_FULL = 65050,
+	LDNS_EDNS_MTL_SIGTAG = 65050,
 	LDNS_EDNS_UNBOUND_CACHEDB_TESTFRAME_TEST = 65534
 };
 typedef enum sldns_enum_edns_option sldns_edns_option;

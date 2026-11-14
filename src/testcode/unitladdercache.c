@@ -467,7 +467,7 @@ test_ladder_cache_touch(void)
 
     // Check the LRU Table
     ladder_buffer_get_sid(test_ladder, hash_size, &sid);
-    h = hashlittle(&sid.id, sid.length, 0xaa);
+    h = hashlittle(&signer_name.labels, signer_name.length, 0xaa);
     struct lruhash *table = slabhash_gettable(&lc->table, h);
 
     struct lruhash_entry *last = table->lru_end;
@@ -684,14 +684,16 @@ test_ladder_cache_full_operation(void)
          {0xd1, 0x98, 0xeb, 0x23, 0x20, 0xd1, 0xd3, 0x16},
          {0x8b, 0xda, 0x2d, 0xf5, 0xe7, 0x48, 0x10, 0x7c},
          {0x2b, 0xd9, 0xf2, 0x99, 0xc4, 0x1d, 0xea, 0x6d}};
-    uint8_t node_count[TEST_MAX_QUERY_NUM] =
-        {1, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6};
     size_t hash_size = 16;
 
-    struct domain_name signer_name;
-    char labels[] = {3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0};
-    signer_name.length = sizeof(labels);
-    memcpy(signer_name.labels, labels, signer_name.length);
+    struct domain_name signer_names[2] = {     // Labels that hash to different buckets
+        { .labels = {1, 'a', 3, 'c', 'o', 'm', 0}, .length = 7},
+        { .labels = {1, 'f', 3, 'c', 'o', 'm', 0}, .length = 7},
+    };
+    uint8_t expected_node_count[TEST_MAX_QUERY_NUM] =
+        {1, 2, 3, 3, 4, 4, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6};
+    uint8_t bucket_input_list[TEST_MAX_QUERY_NUM] =
+        {0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1};
 
     cfg->ladder_cache_size = 4096;
     cfg->ladder_cache_slabs = 2;
@@ -708,14 +710,117 @@ test_ladder_cache_full_operation(void)
         memcpy(&test_ladder->buffer_data[2], sids[i], TEST_SID_LENGTH);
 
         // Add the ladder to the cache
-        unit_assert(ladder_cache_update(lc, test_ladder, hash_size, &signer_name) == 1);
-        unit_assert(test_ladder_cache_count_nodes(lc) == node_count[i]);
+        unit_assert(ladder_cache_update(lc, test_ladder, hash_size, &signer_names[bucket_input_list[i]]) == 1);
+        unit_assert(test_ladder_cache_count_nodes(lc) == expected_node_count[i]);
     }
 
     mtllib_buffer_free(test_ladder);
     ladder_cache_delete(lc);
     config_delete(cfg);
 }
+
+
+/** Test retrieving SigTags */
+static void
+test_ladder_cache_sigtag(void) {
+    uint8_t hash_size = 16;
+    MTLLIB_BUFFER *option_data = NULL;
+    #define TEST_LADDER_LEN (2 + 32 + 2 + (32 * 2))
+    uint8_t sigtag_len = hash_size * 2 + MTL_INDEX_LEN;
+    struct domain_name signer_names[4] = {     
+        { .labels = {1, 'a', 3, 'c', 'o', 'm', 0}, .length = 7},
+        { .labels = {1, 'b', 3, 'c', 'o', 'm', 0}, .length = 7}, // Hashes to same bucket
+        { .labels = {1, 'f', 3, 'c', 'o', 'm', 0}, .length = 7}, // Hashes to different bucket
+        { .labels = {1, 'g', 3, 'c', 'o', 'm', 0}, .length = 7}, // Uncached domain
+    };
+    uint8_t ladder[TEST_LADDER_LEN]; // SID and 2 rungs
+    MTLLIB_BUFFER *ladder_buff;
+    mtllib_buffer_initialize(&ladder_buff, TEST_LADDER_LEN, ladder);
+
+    struct config_file *cfg = config_create();
+    cfg->ladder_cache_slabs = 2;
+    struct ladder_cache *lc = ladder_cache_create(cfg);
+
+
+    // Add test ladders 
+    memset(ladder, 1, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    mtl_index_to_bytes(ladder + 2 + 32 + 2, -10); // Not a valid address -- shouldn't effect ability to parse out right_index
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + MTL_INDEX_LEN, 10);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32, -11);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32 + MTL_INDEX_LEN, 11);
+    ladder_cache_update(lc, ladder_buff, hash_size, &signer_names[0]);
+
+    memset(ladder, 2, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    mtl_index_to_bytes(ladder + 2 + 32 + 2, -20);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + MTL_INDEX_LEN, 20);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32, -21);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32 + MTL_INDEX_LEN, 21);
+    ladder_cache_update(lc, ladder_buff, hash_size, &signer_names[1]);
+
+    memset(ladder, 3, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    mtl_index_to_bytes(ladder + 2 + 32 + 2, -30);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + MTL_INDEX_LEN, 30);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32, -31);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32 + MTL_INDEX_LEN, 31);
+    ladder_cache_update(lc, ladder_buff, hash_size, &signer_names[2]);
+
+    memset(ladder, 4, TEST_LADDER_LEN);
+    uint16_to_bytes(ladder, 0); // Flags
+    uint16_to_bytes(ladder + 2 + 32, 2); // Rung count
+    mtl_index_to_bytes(ladder + 2 + 32 + 2, -41);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + MTL_INDEX_LEN, 41);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32, -40);
+    mtl_index_to_bytes(ladder + 2 + 32 + 2 + 32 + MTL_INDEX_LEN, 40); // rungs out of order should still find the correct maximum right_index
+    ladder_cache_update(lc, ladder_buff, hash_size, &signer_names[0]);
+
+    uint8_t expected_1[] = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,11,
+                            4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,41};
+    uint8_t expected_2[] = {4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,41,
+                            1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,11}; // Order of SigTags depends on cache state; both considered correct
+
+    // Normal operation
+    mtllib_buffer_initialize(&option_data, 3*sigtag_len, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, hash_size, &signer_names[0], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 2*sigtag_len);
+    unit_assert((memcmp(mtllib_buffer_data_ptr(option_data), expected_1, 2*sigtag_len) == 0) || (memcmp(mtllib_buffer_data_ptr(option_data), expected_2, 2*sigtag_len) == 0));
+    mtllib_buffer_free(option_data);
+
+    // Truncated buffer
+    mtllib_buffer_initialize(&option_data, 1.5*sigtag_len, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, hash_size, &signer_names[0], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 1*sigtag_len);
+    unit_assert((memcmp(mtllib_buffer_data_ptr(option_data), expected_1, 1*sigtag_len) == 0) || (memcmp(mtllib_buffer_data_ptr(option_data), expected_2, 1*sigtag_len) == 0));
+    mtllib_buffer_free(option_data);
+
+    mtllib_buffer_initialize(&option_data, 0.5*sigtag_len, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, hash_size, &signer_names[0], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 0);
+    mtllib_buffer_free(option_data);
+
+    // No cached ladder found
+    mtllib_buffer_initialize(&option_data, 3*sigtag_len, NULL);
+    unit_assert(ladder_cache_build_sigtag(lc, hash_size, &signer_names[3], option_data) == 0);
+    unit_assert(mtllib_buffer_in_use(option_data) == 0);
+    mtllib_buffer_free(option_data);
+
+
+    // Null checks
+    mtllib_buffer_initialize(&option_data, 3*sigtag_len, NULL);
+    unit_assert(ladder_cache_build_sigtag(NULL, hash_size, &signer_names[0], option_data) == 1);
+    unit_assert(ladder_cache_build_sigtag(lc, 0, &signer_names[0], option_data) == 1);
+    unit_assert(ladder_cache_build_sigtag(lc, hash_size, NULL, option_data) == 1);
+    unit_assert(ladder_cache_build_sigtag(lc, hash_size, &signer_names[0], NULL) == 1);
+    unit_assert(mtllib_buffer_in_use(option_data) == 0);
+    mtllib_buffer_free(option_data);
+
+}
+
 
 /** test post-quantum MTL code */
 void ladder_cache_test(void)
@@ -737,6 +842,7 @@ void ladder_cache_test(void)
     test_ladder_cache_find_ladder();
     test_ladder_cache_update();
     test_ladder_cache_full_operation();
+    test_ladder_cache_sigtag();
     
     config_delete(ladder_cache_cfg);
 }

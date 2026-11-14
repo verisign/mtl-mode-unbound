@@ -68,6 +68,8 @@ RUN chown -R unbound:unbound /usr/local/etc/unbound
 
 WORKDIR /usr/local/etc/unbound
 
+RUN echo "/usr/local/lib64" > /etc/ld.so.conf.d/crypto.conf && ldconfig -v
+
 # Export DNS ports
 EXPOSE 53/tcp
 EXPOSE 53/udp

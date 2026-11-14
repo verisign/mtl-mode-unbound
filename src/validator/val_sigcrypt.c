@@ -593,8 +593,6 @@ dnskeyset_verify_rrset_sig(struct module_env* env, struct val_env* ve,
 			section, qstate, env);
 		if(sec == sec_status_secure)
 			return sec;
-		if(sec == sec_status_extend)
-			extend_signatures++;
 		else if(sec == sec_status_indeterminate)
 			numindeterminate ++;
 		if(*numverified > MAX_VALIDATE_RRSIGS) {
@@ -605,9 +603,6 @@ dnskeyset_verify_rrset_sig(struct module_env* env, struct val_env* ve,
 			return sec_status_bogus;
 		}
 	}
-	if(extend_signatures != 0) {
-		return sec_status_extend;
-	}	
 	if(numchecked == 0) {
 		*reason = "signatures from unknown keys";
 		if(reason_bogus)
@@ -675,8 +670,6 @@ dnskeyset_verify_rrset(struct module_env* env, struct val_env* ve,
 		} else if(sigalg && sec == sec_status_bogus) {
 			algo_needs_set_bogus(&needs,
 				(uint8_t)rrset_get_sig_algo(rrset, i));
-		} else if(sec == sec_status_extend) {
-			return sec_status_extend;
 		}
 		if(*verified > MAX_VALIDATE_RRSIGS) {
 			verbose(VERB_QUERY, "rrset failed to verify, too many RRSIG validations");
@@ -746,9 +739,6 @@ dnskey_verify_rrset(struct module_env* env, struct val_env* ve,
 			dnskey, dnskey_idx, i, &sortree, &buf_canon, reason,
 			reason_bogus, section, qstate, env);
 		if(sec == sec_status_secure)
-			return sec;
-		if(sec == sec_status_extend)
-			verbose(VERB_ALGO, "rrset failed to verify: insufficient information (requery)");
 			return sec;
 
 		numchecked ++;
@@ -1070,7 +1060,7 @@ insert_can_owner(sldns_buffer* buf, struct ub_packed_rrset_key* k,
 	uint8_t* sig, uint8_t** can_owner, size_t* can_owner_len)
 {
 	int rrsig_labels = (int)sig[3];
-	int fqdn_labels = dname_signame_label_count(k->rk.dname);
+	int fqdn_labels = dname_sigtag_label_count(k->rk.dname);
 	*can_owner = sldns_buffer_current(buf);
 	if(rrsig_labels == fqdn_labels) {
 		/* no change */
@@ -1661,7 +1651,7 @@ dnskey_verify_rrset_sig(struct regional* region, sldns_buffer* buf,
 	}
 
 	/* verify labels is in a valid range */
-	if((int)sig[2+3] > dname_signame_label_count(rrset->rk.dname)) {
+	if((int)sig[2+3] > dname_sigtag_label_count(rrset->rk.dname)) {
 		verbose(VERB_QUERY, "verify: labelcount out of range");
 		*reason = "signature labelcount out of range";
 		if(reason_bogus)

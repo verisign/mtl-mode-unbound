@@ -1122,20 +1122,6 @@ int mesh_add_sub(struct module_qstate* qstate, struct query_info* qinfo,
 			return 0;
 		}
 
-		if(qstate->full_edns) {		
-			/* allocate new element */
-			opt = (struct edns_option*)regional_alloc(qstate->region, sizeof(*opt));
-			if(!opt)
-				return 1;
-
-			opt->next = NULL;
-			opt->opt_code = LDNS_EDNS_MTL_FULL;
-			opt->opt_len = 0;
-			opt->opt_data = NULL;
-		
-			(*sub)->s.edns_opts_back_out = opt;
-			(*sub)->s.no_cache_lookup = 1;
-		}
 
 #ifdef UNBOUND_DEBUG
 		n =

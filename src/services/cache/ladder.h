@@ -53,6 +53,9 @@
 
 struct config_file;
 
+// Current max supported sigtags = 16; each sigtag length = 40 octets
+#define SIGTAG_MAX_LEN (8 * (32 + 8)) 
+
 /********************************************
  * Structures for the ladder caches
  ********************************************/
@@ -223,5 +226,18 @@ void ladder_cache_data_free(void *data, void *userdata);
  * @return 1 if they match and 0 if not
  */
 uint8_t ladder_cache_is_ladder_equal(MTLLIB_BUFFER *ladder_one, MTLLIB_BUFFER *ladder_two);
+
+/**
+ * Construct SigTag OPTION-DATA
+ * @param l: the ladder cache
+ * @param hash_size: length in bytes of the hash (aka security parameter)
+ * @param signer_name: the signer_name for which to search the cache for associated ladders
+ * @param option_data: buffer to fill with SigTags
+ * @return: 0 on success, 1 on failure. If successful, option-length is in_use(option_data).
+ *  If option_data is too small to hold all SigTags, the function will add as many as will fit;
+ *  This scenario is still considered a success
+ */
+uint8_t
+ladder_cache_build_sigtag(struct ladder_cache *l, size_t hash_size, struct domain_name *signer_name, MTLLIB_BUFFER *option_data);
 
 #endif /* SERVICES_CACHE_LADDER_H */
